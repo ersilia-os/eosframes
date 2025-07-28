@@ -1,21 +1,23 @@
 import sys
 sys.path.append("/Users/ziminqian/Desktop/ersilia")
-from ersilia.api import ErsiliaModel
+
 import pandas as pd
 from transform import Transform
 
-#cd /path/to/ersilia
-#pip install -e .
+# Load CSV
+df = pd.read_csv("output_five.csv")
+df_numeric = df.select_dtypes(include=["number"]) # Drop any rows with non-numeric values
 
-# df = csv to data frame
+# Initialize transformer
+transformer = Transform(False, True, 256)
 
-transformer = Transform(n_bins=256)
-df_transformed = transformer.fit_transform(df)
+# Run the transformation
+df_transformed = transformer.run(df_numeric)
 
-# Simple assertions
+# Assertions on the transformed DataFrame
 assert isinstance(df_transformed, pd.DataFrame)
 assert df_transformed.shape == df.shape
 assert df_transformed.min().min() >= -128
 assert df_transformed.max().max() <= 127
 
-print(df_transformed)
+print(df_transformed.head())
