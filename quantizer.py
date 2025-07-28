@@ -18,7 +18,7 @@ def quantize(df) :
     if df.empty:
         return df
 
-    numeric_df = df_scaled.select_dtypes(include=['number'])
+    numeric_df = df.select_dtypes(include=['number'])
 
     X = numeric_df.to_numpy()
     n_bins = 256

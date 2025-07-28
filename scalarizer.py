@@ -19,21 +19,23 @@ def scalarize(df, power_transform, robust_scalar):
     
     # Check if the DataFrame is empty
     if df.empty:
-        return df
-    
+        raise ValueError("Input DataFrame is empty.")
+       
+    # Ensure only numeric columns
+    numeric_cols = df.select_dtypes(include=['number']).columns
+    df_numeric = df[numeric_cols]
+
     # Ensure that the DataFrame contains only numeric columns
     if not all(df.dtypes.apply(lambda x: pd.api.types.is_numeric_dtype(x))):
         raise ValueError("DataFrame must contain only numeric columns.")
     
     #Impute missing values with median
     imputer = SimpleImputer(strategy="median")
-    imputer.fit(df) 
+    df_imputed = pd.DataFrame(imputer.fit_transform(df_numeric), columns=numeric_cols)
 
-    numeric_cols = df.select_dtypes(include=['number']).columns
-    
     if robust_scalar:
         s = RobustScaler()
-        df_scaled = df.copy() #need to define df_scaled variable first 
+        df_scaled = df_imputed.copy() #need to define df_scaled variable first 
         df_scaled[numeric_cols] = s.fit_transform(df[numeric_cols])
 
     if power_transform:      
@@ -43,6 +45,7 @@ def scalarize(df, power_transform, robust_scalar):
         # Yeo-Johnson supports both positive and negative values
 
         # Fit and transform the data
-        df_scaled = pd.DataFrame(pt.fit_transform(df), numeric_cols)
+        data = pt.fit_transform(df_imputed)
+        df_scaled = pd.DataFrame(data, columns=numeric_cols)
 
     return df_scaled
