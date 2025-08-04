@@ -11,7 +11,7 @@ class Scale:
         return self.scaler, df_scaled
 
     def inference(self, df):
-         if self.scaler_ is None:
+        if self.scaler_ is None:
             raise ValueError("You must call fit() before inference()")
         return self.scaler.transform(df) #scikit-learn transformer has function .transform()
 
