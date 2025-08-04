@@ -8,13 +8,13 @@ from sklearn.preprocessing import PowerTransformer
 
 def scalarize(df, power_transform, robust_scalar):
     """
-    Scales the numerical features of a DataFrame using RobustScaler or .
+    Scales the numerical features of a DataFrame using RobustScaler or a PowerTransformer.
     
     Parameters:
     df (pd.DataFrame): Input DataFrame with numerical features to scale.
     
     Returns:
-    pd.DataFrame: DataFrame with scaled numerical features.
+    Tuple[scaler, df_scaled]: The fitted transformer and the transformed DataFrame
     """
     
     # Check if the DataFrame is empty
@@ -33,19 +33,17 @@ def scalarize(df, power_transform, robust_scalar):
     imputer = SimpleImputer(strategy="median")
     df_imputed = pd.DataFrame(imputer.fit_transform(df_numeric), columns=numeric_cols)
 
+    df_scaled = df_imputed.copy() 
+
     if robust_scalar:
-        s = RobustScaler()
-        df_scaled = df_imputed.copy() #need to define df_scaled variable first 
-        df_scaled[numeric_cols] = s.fit_transform(df[numeric_cols])
+        scaler = RobustScaler()
+        df_scaled[numeric_cols] = scaler.fit_transform(df_imputed[numeric_cols])
 
     if power_transform:      
-        # Initialize the transformer
-        pt = PowerTransformer(method='yeo-johnson', standardize=True)
+        scaler = PowerTransformer(method='yeo-johnson', standardize=True)
         #Box-Cox only supports positive values
         # Yeo-Johnson supports both positive and negative values
+        df_scaled[numeric_cols] = scaler.fit_transform(df_imputed[numeric_cols])
 
-        # Fit and transform the data
-        data = pt.fit_transform(df_imputed)
-        df_scaled = pd.DataFrame(data, columns=numeric_cols)
 
-    return df_scaled
+    return scaler, df_scaled
