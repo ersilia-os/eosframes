@@ -25,7 +25,7 @@ class Scale:
         if len(numeric_cols == 0):
             raise ValueError("No numeric columns to transform.")
         
-        X = self.pipeline_.fit_transform(df[numeric_cols].to_numpy())
+        X = self.pipeline_.fit_transform(df[numeric_cols].to_numpy()) #scikit-learn require numpy array input
         self._is_fitted = True
 
         return pd.DataFrame(
