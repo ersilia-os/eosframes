@@ -23,7 +23,7 @@ class Scale:
         # Ensure only numeric columns
         numeric_cols = df.select_dtypes(include="number").columns
         if len(numeric_cols == 0):
-            raise ValueError("No numeric columnds to transform.")
+            raise ValueError("No numeric columns to transform.")
         
         X = self.pipeline_.fit_transform(df[numeric_cols].to_numpy())
         self._is_fitted = True
