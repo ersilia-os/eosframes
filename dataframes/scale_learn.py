@@ -1,4 +1,4 @@
-from scalarizer import scalarize
+from dataframes.scalarizer import scalarize
 
 class Scale:
     def __init__(self, robust_scalar, power_transformer):
@@ -7,7 +7,7 @@ class Scale:
         self.scaler = None  # will hold fitted transformer
 
     def train(self, df):
-        self.scaler, df_scaled = scalarize(df, self.power_transformer, self.robust_scalar) # Using RobustScaler
+        self.scaler, df_scaled = scalarize(df,self.robust_scalar, self.power_transformer, ) # Using RobustScaler
         return self.scaler, df_scaled
 
     def inference(self, df):
