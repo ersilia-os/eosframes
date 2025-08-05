@@ -1,19 +1,18 @@
 import pandas as pd
 from data_frames.scalarizer import make_scalarizer
-import numpy as np
 
 class Scale:
     def __init__(
             self, 
             robust_scalar: bool = False, 
-            power_transform: bool=False):
-        self.robust_scalar = robust_scalar
-        self.power_transform = power_transform
+            power_transform: bool=False
+    ):
         self.pipeline_ = make_scalarizer(
-            power_transfrom=self.power_transform,
-            robust_scaler=self.robust_scalar
+            power_transfrom=power_transform,
+            robust_scaler=robust_scalar
             )
         self._is_fitted = False
+        self.feature_cols: list[str] = []
 
     def fit(self, df: pd.DataFrame) -> pd.DataFrame:
         # Check if the DataFrame is empty
@@ -22,16 +21,17 @@ class Scale:
         
         # Ensure only numeric columns
         numeric_cols = df.select_dtypes(include="number").columns
-        if len(numeric_cols == 0):
+        if len(numeric_cols) == 0:
             raise ValueError("No numeric columnds to transform.")
         
-        X = self.pipeline_.fit_transform(df[numeric_cols].to_numpy())
+        X_trans = self.pipeline_.fit_transform(df[numeric_cols])
         self._is_fitted = True
+        self.feature_cols = list(numeric_cols)
 
         return pd.DataFrame(
-            X,
-            infex=df.index,
-            columns=numeric_cols
+            X_trans,
+            index=df.index,
+            columns=self.feature_cols
         )
 
     def inference(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -44,11 +44,11 @@ class Scale:
         if len(numeric_cols) == 0:
             raise ValueError("No numeric columnds to transform.")
        
-        X = self.pipeline_transform(df[numeric_cols].to_numpy())
+        X_new = self.pipeline_.transform(df[numeric_cols].to_numpy())
         return pd.DataFrame(
-            X,
-            infex=df.index,
-            columns=numeric_cols
+            X_new ,
+            index=df.index,
+            columns=self.feature_cols
         )
 
     
