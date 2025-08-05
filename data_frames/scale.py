@@ -8,8 +8,8 @@ class Scale:
             power_transform: bool=False
     ):
         self.pipeline_ = make_scalarizer(
-            power_transfrom=power_transform,
-            robust_scaler=robust_scalar
+            power_transform=power_transform,
+            robust_scalar=robust_scalar
             )
         self._is_fitted = False
         self.feature_cols: list[str] = []

@@ -4,8 +4,8 @@ from sklearn.preprocessing import PowerTransformer, RobustScaler
 from sklearn.pipeline import Pipeline
 
 def make_scalarizer(
-        power_transfrom: bool = False,
-        robust_scaler: bool = False
+        power_transform: bool = False,
+        robust_scalar: bool = False
 ) -> Pipeline:
     """
     Build a sklearn Pipeline which:
@@ -17,9 +17,9 @@ def make_scalarizer(
     steps = [
         ("imputer", SimpleImputer(strategy="median"))
     ]
-    if power_transfrom:
+    if power_transform:
         steps.append(("power", PowerTransformer(method="yeo-johnson", standardize=True)))
-    if power_transfrom:
-        steps.append(("scale", RobustScaler()))
+    if robust_scalar:
+        steps.append(("standard", RobustScaler()))
     
     return Pipeline(steps)
