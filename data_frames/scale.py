@@ -1,4 +1,7 @@
 import pandas as pd
+import joblib
+import json
+import os
 from data_frames.scalarizer import make_scalarizer
 
 class Scale:
@@ -7,6 +10,10 @@ class Scale:
             robust_scalar: bool = False, 
             power_transform: bool=False
     ):
+        # Store the original parameters for saving/loading
+        self.robust_scalar = robust_scalar
+        self.power_transform = power_transform
+        
         self.pipeline_ = make_scalarizer(
             power_transform=power_transform,
             robust_scalar=robust_scalar
@@ -33,6 +40,93 @@ class Scale:
             index=df.index,
             columns=self.feature_cols
         )
+    
+    #Zimin save/load changes
+
+    def save_model(self, model_dir: str):
+        """
+        Save the fitted pipeline and related metadata to a directory.
+        
+        Args:
+            model_dir (str): Directory path where the model files will be saved.
+                            If the directory doesn't exist, it will be created.
+        
+        Raises:
+            ValueError: If the model hasn't been fitted yet.
+        """
+        # Check if the model has been fitted before attempting to save
+        if not hasattr(self, "_is_fitted") or not self._is_fitted:
+            raise ValueError("Model not fitted. Call `fit` first.")
+
+        # Create the model directory if it doesn't exist
+        if not os.path.exists(model_dir):
+            os.makedirs(model_dir)
+
+        # Save the fitted pipeline to a joblib file
+        # This serializes the entire pipeline object including all fitted transformers
+        pipeline_path = os.path.join(model_dir, "pipeline.joblib")
+        joblib.dump(self.pipeline_, pipeline_path)
+
+        # Create metadata dictionary containing all the important attributes
+        # This includes the configuration parameters and fitted state information
+        metadata = {
+            "robust_scalar": self.robust_scalar,  # Use the stored robust_scalar
+            "power_transform": self.power_transform,  # Use the stored power_transform
+            "feature_cols": self.feature_cols,  # Save the feature column names that were used during fitting
+            "_is_fitted": self._is_fitted,  # Save the fitted state
+        }
+        
+        # Save the metadata as a JSON file for easy reading and debugging
+        meta_path = os.path.join(model_dir, "metadata.json")
+        with open(meta_path, "w") as f:
+            json.dump(metadata, f, indent=2)  # Use indent=2 for pretty formatting
+
+    @classmethod
+    def load_model(cls, model_dir: str):
+        """
+        Load a previously saved model from a directory.
+        
+        Args:
+            model_dir (str): Directory path where the model files are stored.
+        
+        Returns:
+            Scale: A new Scale instance with the loaded pipeline and metadata.
+        
+        Raises:
+            FileNotFoundError: If the model directory or required files don't exist.
+        """
+        # Check if the model directory exists
+        if not os.path.exists(model_dir):
+            raise FileNotFoundError(f"Model directory {model_dir} does not exist.")
+        
+        # Check if the pipeline file exists and load it
+        pipeline_path = os.path.join(model_dir, "pipeline.joblib")
+        if not os.path.exists(pipeline_path):
+            raise FileNotFoundError(f"Pipeline file {pipeline_path} not found.")
+        pipeline = joblib.load(pipeline_path)  # Load the fitted pipeline object
+        
+        # Check if the metadata file exists and load it
+        meta_path = os.path.join(model_dir, "metadata.json")
+        if not os.path.exists(meta_path):
+            raise FileNotFoundError(f"Metadata file {meta_path} not found.")
+        
+        # Load the metadata from JSON file
+        with open(meta_path, "r") as f:
+            metadata = json.load(f)
+
+        # Create a new instance of the Scale class with the original parameters
+        # We need to extract the original parameters from metadata or use defaults
+        obj = cls(
+            robust_scalar=metadata.get("robust_scalar", False),  # Get robust_scalar from metadata or default to False
+            power_transform=metadata.get("power_transform", False),  # Get power_transform from metadata or default to False
+        )
+        
+        # Restore the fitted pipeline and other attributes
+        obj.pipeline_ = pipeline  # Restore the fitted pipeline
+        obj.feature_cols = metadata.get("feature_cols", [])  # Restore the feature column names
+        obj._is_fitted = metadata.get("_is_fitted", False)  # Restore the fitted state
+
+        return obj
 
     def inference(self, df: pd.DataFrame) -> pd.DataFrame:
         """
