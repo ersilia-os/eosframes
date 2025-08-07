@@ -64,8 +64,8 @@ class Scale:
 
         # Save the fitted pipeline to a joblib file
         # This serializes the entire pipeline object including all fitted transformers
-        pipeline_path = os.path.join(model_dir, "pipeline.joblib")
-        joblib.dump(self.pipeline_, pipeline_path)
+        pipeline_path = os.path.join(model_dir, "pipeline.joblib") #creates a file path 
+        joblib.dump(self.pipeline_, pipeline_path) #converts pipeline object into binary data to that file with median, etc
 
         # Create metadata dictionary containing all the important attributes
         # This includes the configuration parameters and fitted state information
