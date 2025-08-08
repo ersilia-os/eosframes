@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 
 
 scale = Scale(robust_scalar=True, power_transform=True)
-fitted_df = scale.fit("outputall.csv")
+fitted_df = scale.fit('outputall.csv')
 
 # Save the model
 scale.save_model("my_model_directory")
