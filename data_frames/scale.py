@@ -24,7 +24,7 @@ class Scale:
     def fit(self, df: pd.DataFrame) -> pd.DataFrame:
         # Check if the DataFrame is empty
         if df.empty:
-            raise ValueError("Input DataFrame is empty.")
+             raise ValueError("Input DataFrame is empty.")
         
         # Ensure only numeric columns
         numeric_cols = df.select_dtypes(include="number").columns

@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 
 
 scale = Scale(robust_scalar=True, power_transform=True)
-fitted_df = scale.fit(your_dataframe)
+fitted_df = scale.fit("outputall.csv")
 
 # Save the model
 scale.save_model("my_model_directory")
@@ -14,7 +14,8 @@ scale.save_model("my_model_directory")
 loaded_scale = Scale.load_model("my_model_directory")
 
 # Use the loaded model for inference
-result = loaded_scale.inference(new_dataframe)
+result = loaded_scale.inference()
+result.to_csv('new_inference_scaled.csv', index=False)
 
 # # Load CSV
 # df = pd.read_csv("output_all.csv", skiprows=1) #fix the label(non numerical row)
