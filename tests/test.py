@@ -2,7 +2,7 @@ import sys
 sys.path.append("/Users/ziminqian/Desktop/ersilia")
 
 import pandas as pd
-from transform import Transform
+from robustscale import Transform
 
 # Load CSV
 df = pd.read_csv("output_five.csv", skiprows=1) #fix the label(non numerical row)

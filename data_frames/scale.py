@@ -147,13 +147,14 @@ class Scale:
         """
         Transform new data with the already-fitted pipeline
         """
-        if not self._is_fitted:
-            raise RuntimeError("You must call .fit() before .inference()")
+        # if not self._is_fitted:
+        #     raise RuntimeError("You must call .fit() before .inference()")
         numeric_cols = df.select_dtypes(include="number").columns
         if len(numeric_cols) == 0:
             raise ValueError("No numeric columnds to transform.")
        
-        X_new = self.pipeline_.transform(df[numeric_cols].to_numpy())
+        X_new = self.pipeline_.transform(df[numeric_cols])
+        
         return pd.DataFrame(
             X_new ,
             index=df.index,

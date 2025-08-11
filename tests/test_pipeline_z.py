@@ -11,10 +11,6 @@ scale = Scale(robust_scaler=True, power_transform=False)
 
 df = pd.read_csv('output_all.csv')
 df_feature1 = df.iloc[:, [2]] #column 2 is the feature "abc"
-print("Training columns:", df_feature1.columns.tolist())
-
-
-df_feature1 = df_feature1.astype(float)
 
 
 fitted_df = scale.fit(df_feature1) 
@@ -25,16 +21,10 @@ scale.save("model_directory")
 
 
 # Later, load the model
-loaded_scale = Scale.load("model_directory")
+loaded_scale = scale.load("model_directory")
 # Use the loaded model for inference
 df_inference = pd.read_csv('ten_inf_numeric.csv')
 df_inference1 = df_inference.iloc[:, [3]] #column 2 is the feature "abc"
-
-
-df_inference1 = df_inference1.astype(float)
-
-
-print("Inference columns before:", df_inference1.columns.tolist())
 
 
 result = loaded_scale.inference(df_inference1)
