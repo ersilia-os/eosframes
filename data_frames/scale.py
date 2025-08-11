@@ -3,21 +3,21 @@ import joblib
 import json
 import os
 from datetime import datetime
-from data_frames.scalarizer import make_scalarizer
+from data_frames.scaler import make_scaler
 
 class Scale:
     def __init__(
             self, 
-            robust_scalar: bool = False, 
+            robust_scaler: bool = False, 
             power_transform: bool=False
     ):
         # Store the original parameters for saving/loading
-        self.robust_scalar = robust_scalar
+        self.robust_scaler = robust_scaler
         self.power_transform = power_transform
         
-        self.pipeline_ = make_scalarizer(
+        self.pipeline_ = make_scaler(
             power_transform=power_transform,
-            robust_scalar=robust_scalar
+            robust_scaler=robust_scaler
             )
         self._is_fitted = False
         self.feature_cols: list[str] = []
@@ -78,7 +78,7 @@ class Scale:
         # Create metadata dictionary containing all the important attributes
         # This includes the configuration parameters and fitted state information
         metadata = {
-            "robust_scalar": self.robust_scalar,  # Use the stored robust_scalar
+            "robust_scaler": self.robust_scaler,  # Use the stored robust_scaler
             "power_transform": self.power_transform,  # Use the stored power_transform
             "feature_cols": self.feature_cols,  # Save the feature column names that were used during fitting
             "fit_date": self.fit_timestamp.strftime("%Y-%m-%d") if hasattr(self, 'fit_timestamp') else None,
@@ -128,7 +128,7 @@ class Scale:
         # Create a new instance of the Scale class with the original parameters
         # We need to extract the original parameters from metadata or use defaults
         obj = cls(
-            robust_scalar=metadata.get("robust_scalar", False),  # Get robust_scalar from metadata or default to False
+            robust_scaler=metadata.get("robust_scaler", False),  # Get robust_scaler from metadata or default to False
             power_transform=metadata.get("power_transform", False),  # Get power_transform from metadata or default to False
         )
         

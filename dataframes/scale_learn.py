@@ -1,13 +1,13 @@
 from dataframes.scalarizer import scalarize
 
 class Scale:
-    def __init__(self, robust_scalar, power_transformer):
-        self.robust_scalar = robust_scalar
+    def __init__(self, robust_scaler, power_transformer):
+        self.robust_scaler = robust_scaler
         self.power_transformer = power_transformer
         self.scaler = None  # will hold fitted transformer
 
     def train(self, df):
-        self.scaler, df_scaled = scalarize(df,self.robust_scalar, self.power_transformer, ) # Using RobustScaler
+        self.scaler, df_scaled = scalarize(df,self.robust_scaler, self.power_transformer, ) # Using RobustScaler
         return self.scaler, df_scaled
 
     def inference(self, df):

@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 
 
 
-scale = Scale(robust_scalar=True, power_transform=False)
+scale = Scale(robust_scaler=True, power_transform=False)
 
 
 df = pd.read_csv('output_all.csv')
@@ -53,7 +53,7 @@ result.to_csv('new_inference_scaled.csv', index=False)
 
 
 # #instantiate the Scale class
-# scaler = Scale(robust_scalar=True, power_transform=False)
+# scaler = Scale(robust_scaler=True, power_transform=False)
 
 
 # # Initialize transformer

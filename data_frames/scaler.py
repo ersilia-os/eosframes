@@ -3,9 +3,9 @@ from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import PowerTransformer, RobustScaler
 from sklearn.pipeline import Pipeline
 
-def make_scalarizer(
+def make_scaler(
         power_transform: bool = False,
-        robust_scalar: bool = False
+        robust_scaler: bool = False
 ) -> Pipeline:
     """
     Build a sklearn Pipeline which:
@@ -19,7 +19,7 @@ def make_scalarizer(
     ]
     if power_transform:
         steps.append(("power", PowerTransformer(method="yeo-johnson", standardize=True)))
-    if robust_scalar:
+    if robust_scaler:
         steps.append(("standard", RobustScaler()))
     
     return Pipeline(steps)

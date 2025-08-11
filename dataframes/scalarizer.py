@@ -6,7 +6,7 @@ from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import PowerTransformer
 
 
-def scalarize(df, robust_scalar, power_transform):
+def scalarize(df, robust_scaler, power_transform):
     """
     Scales the numerical features of a DataFrame using RobustScaler or a PowerTransformer.
     
@@ -35,7 +35,7 @@ def scalarize(df, robust_scalar, power_transform):
 
     df_scaled = df_imputed.copy() 
 
-    if robust_scalar:
+    if robust_scaler:
         scaler = RobustScaler()
         df_scaled[numeric_cols] = scaler.fit_transform(df_imputed[numeric_cols])
 

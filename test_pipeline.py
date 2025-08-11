@@ -4,7 +4,7 @@ import joblib
 import matplotlib.pyplot as plt
 
 # 1. Fit on "training" DataFrame
-scaler = Scale(robust_scalar=True, power_transform=False)
+scaler = Scale(robust_scaler=True, power_transform=False)
 df_train = pd.read_csv("first_500_output.csv")
 
 # 2. pick only the descriptor columns (everything except “key” and “input”)
