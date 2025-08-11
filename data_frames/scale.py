@@ -2,6 +2,7 @@ import pandas as pd
 import joblib
 import json
 import os
+from datetime import datetime
 from data_frames.scalarizer import make_scalarizer
 
 class Scale:
@@ -20,11 +21,18 @@ class Scale:
             )
         self._is_fitted = False
         self.feature_cols: list[str] = []
+        self.num_rows = 0 
 
     def fit(self, df: pd.DataFrame) -> pd.DataFrame:
         # Check if the DataFrame is empty
         if df.empty:
              raise ValueError("Input DataFrame is empty.")
+        
+        # Set the number of rows
+        self.num_rows = len(df)
+        
+        # Capture the timestamp when fit was called
+        self.fit_timestamp = datetime.now()
         
         # Ensure only numeric columns
         numeric_cols = df.select_dtypes(include="number").columns
@@ -43,7 +51,7 @@ class Scale:
     
     #Zimin save/load changes
 
-    def save_model(self, model_dir: str):
+    def save(self, model_dir: str):
         """
         Save the fitted pipeline and related metadata to a directory.
         
@@ -73,7 +81,10 @@ class Scale:
             "robust_scalar": self.robust_scalar,  # Use the stored robust_scalar
             "power_transform": self.power_transform,  # Use the stored power_transform
             "feature_cols": self.feature_cols,  # Save the feature column names that were used during fitting
-            "_is_fitted": self._is_fitted,  # Save the fitted state
+            "fit_date": self.fit_timestamp.strftime("%Y-%m-%d") if hasattr(self, 'fit_timestamp') else None,
+            "fit_time": self.fit_timestamp.strftime("%H:%M:%S") if hasattr(self, 'fit_timestamp') else None,
+            "fit_timestamp": self.fit_timestamp.isoformat() if hasattr(self, 'fit_timestamp') else None,
+            "num_rows": self.num_rows
         }
         
         # Save the metadata as a JSON file for easy reading and debugging
@@ -82,7 +93,7 @@ class Scale:
             json.dump(metadata, f, indent=2)  # Use indent=2 for pretty formatting
 
     @classmethod
-    def load_model(cls, model_dir: str):
+    def load(cls, model_dir: str):
         """
         Load a previously saved model from a directory.
         
@@ -125,6 +136,10 @@ class Scale:
         obj.pipeline_ = pipeline  # Restore the fitted pipeline
         obj.feature_cols = metadata.get("feature_cols", [])  # Restore the feature column names
         obj._is_fitted = metadata.get("_is_fitted", False)  # Restore the fitted state
+        
+        # Restore timestamp if available
+        if "fit_timestamp" in metadata and metadata["fit_timestamp"]:
+            obj.fit_timestamp = datetime.fromisoformat(metadata["fit_timestamp"])
 
         return obj
 
