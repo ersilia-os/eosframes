@@ -61,15 +61,5 @@ def bin(
 
     # Choose 'uniform' or 'quantile' strategy
     kbd = KBinsDiscretizer(n_bins=n_bins, encode='ordinal', strategy='uniform')
-    X_binned = kbd.fit_transform(X)
-
-    X_binned_centered = X_binned.astype(int) - (n_bins // 2 - 1)
-
-    #convert to data frame
-    X_binned_centered_df = pd.DataFrame(
-    X_binned_centered,
-    columns=numeric_df.columns,
-    index=numeric_df.index
-    )
     
-    return X_binned_centered_df
+    return kbd
