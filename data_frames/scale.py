@@ -4,6 +4,7 @@ import json
 import os
 from datetime import datetime
 from data_frames.scaler import make_scaler
+import boto3
 
 class Scale:
     def __init__(
@@ -74,6 +75,11 @@ class Scale:
         # This serializes the entire pipeline object including all fitted transformers
         pipeline_path = os.path.join(model_dir, "pipeline.joblib") #creates a file path 
         joblib.dump(self.pipeline_, pipeline_path) #converts pipeline object into binary data to that file with median, etc
+        
+        # s3 = boto3.client('s3')
+        # bucket_name = str(model_dir)
+        # object_key = "scaler.zip"
+        # s3.upload_file(pipeline_path, bucket_name, object_key)
 
         # Create metadata dictionary containing all the important attributes
         # This includes the configuration parameters and fitted state information
@@ -115,6 +121,11 @@ class Scale:
         if not os.path.exists(pipeline_path):
             raise FileNotFoundError(f"Pipeline file {pipeline_path} not found.")
         pipeline = joblib.load(pipeline_path)  # Load the fitted pipeline object
+
+        # Download from S3
+        # s3.download_file(bucket_name, object_key, "robust_scaler_downloaded.joblib")
+        # # Load the transformer
+        # scaler_loaded = joblib.load("robust_scaler_downloaded.joblib")
         
         # Check if the metadata file exists and load it
         meta_path = os.path.join(model_dir, "metadata.json")
