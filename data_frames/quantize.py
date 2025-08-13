@@ -7,7 +7,7 @@ from data_frames.scalerizer import scalerize
 from data_frames.quantizer import bin
 
 
-class Quantize(df):
+class Quantize:
     def __init__(
             self, 
             robust_scaler: bool = False, 
@@ -17,10 +17,7 @@ class Quantize(df):
         self.robust_scaler = robust_scaler
         self.power_transform = power_transform
         
-        self.transformer = bin(
-            power_transform=power_transform,
-            robust_scaler=robust_scaler
-            )
+        self.transformer = bin()
         self._is_fitted = False
         self.feature_cols: list[str] = []
         self.num_rows = 0
@@ -42,7 +39,10 @@ class Quantize(df):
             raise ValueError("No numeric columns to transform.")
         
         scaled_df = scalerize(df, self.robust_scaler, self.power_transform)
-        X_bin = self.transformer.fit(scaled_df) #do we use fit or fit_transform?
+        X_bin = self.transformer.fit_transform(scaled_df) 
+
+        n_bins = 256
+        X_bin = X_bin.astype(int) - (n_bins // 2 - 1)
         
         self._is_fitted = True
         self.feature_cols = list(numeric_cols)
@@ -75,7 +75,7 @@ class Quantize(df):
         # Save the fitted pipeline to a joblib file
         # This serializes the entire pipeline object including all fitted transformers
         pipeline_path = os.path.join(model_dir, "pipeline.joblib") #creates a file path 
-        joblib.dump(self.pipeline_, pipeline_path) #converts pipeline object into binary data to that file with median, etc
+        joblib.dump(self.transformer, pipeline_path) #converts pipeline object into binary data to that file with median, etc
 
         # Create metadata dictionary containing all the important attributes
         # This includes the configuration parameters and fitted state information
@@ -135,7 +135,7 @@ class Quantize(df):
         )
         
         # Restore the fitted pipeline and other attributes
-        obj.pipeline_ = pipeline  # Restore the fitted pipeline
+        obj.transformer = pipeline  # Restore the fitted transformer
         obj.feature_cols = metadata.get("feature_cols", [])  # Restore the feature column names
         obj._is_fitted = metadata.get("_is_fitted", False)  # Restore the fitted state
         
@@ -149,14 +149,16 @@ class Quantize(df):
         """
         Transform new data with the already-fitted pipeline
         """
-        if not self._is_fitted:
-            raise RuntimeError("You must call .fit() before .inference()")
+        # if not self._is_fitted:
+        #     raise RuntimeError("You must call .fit() before .inference()")
         
         numeric_cols = df.select_dtypes(include="number").columns
         if len(numeric_cols) == 0:
             raise ValueError("No numeric columns to transform.")
        
-        X_new = self.pipeline_.transform(df[numeric_cols])
+        # Apply the same preprocessing that was used during fitting
+        scaled_df = scalerize(df[numeric_cols], self.robust_scaler, self.power_transform)
+        X_new = self.transformer.transform(scaled_df)
         
         return pd.DataFrame(
             X_new,
