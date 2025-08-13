@@ -3,7 +3,7 @@ import joblib
 import json
 import os
 from datetime import datetime
-from data_frames.scaler import make_scaler
+from data_frames.scalerizer import scalerize
 from data_frames.quantizer import bin
 
 
@@ -17,13 +17,13 @@ class Quantize(df):
         self.robust_scaler = robust_scaler
         self.power_transform = power_transform
         
-        self.pipeline_ = bin(
+        self.transformer = bin(
             power_transform=power_transform,
             robust_scaler=robust_scaler
             )
         self._is_fitted = False
         self.feature_cols: list[str] = []
-        self.num_rows = 0 
+        self.num_rows = 0
 
     def fit(self, df: pd.DataFrame) -> pd.DataFrame:
         # Check if the DataFrame is empty
@@ -39,9 +39,11 @@ class Quantize(df):
         # Ensure only numeric columns
         numeric_cols = df.select_dtypes(include="number").columns
         if len(numeric_cols) == 0:
-            raise ValueError("No numeric columnds to transform.")
+            raise ValueError("No numeric columns to transform.")
         
-        X_bin = self.pipeline_.fit_transform(df[numeric_cols])
+        scaled_df = scalerize(df, self.robust_scaler, self.power_transform)
+        X_bin = self.transformer.fit(scaled_df) #do we use fit or fit_transform?
+        
         self._is_fitted = True
         self.feature_cols = list(numeric_cols)
 
@@ -50,6 +52,7 @@ class Quantize(df):
             index=df.index,
             columns=self.feature_cols
         )
+
     def save(self, model_dir: str):
         """
         Save the fitted pipeline and related metadata to a directory.
@@ -146,16 +149,17 @@ class Quantize(df):
         """
         Transform new data with the already-fitted pipeline
         """
-        # if not self._is_fitted:
-        #     raise RuntimeError("You must call .fit() before .inference()")
+        if not self._is_fitted:
+            raise RuntimeError("You must call .fit() before .inference()")
+        
         numeric_cols = df.select_dtypes(include="number").columns
         if len(numeric_cols) == 0:
-            raise ValueError("No numeric columnds to transform.")
+            raise ValueError("No numeric columns to transform.")
        
         X_new = self.pipeline_.transform(df[numeric_cols])
         
         return pd.DataFrame(
-            X_new ,
+            X_new,
             index=df.index,
             columns=self.feature_cols
         )

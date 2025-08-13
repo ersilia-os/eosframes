@@ -4,7 +4,7 @@ from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import PowerTransformer, RobustScaler
 
 
-def scalarize(
+def scalerize(
         df: pd.DataFrame, 
         robust_scalar: bool = False, 
         power_transform: bool = False
