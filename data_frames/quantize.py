@@ -4,7 +4,8 @@ import json
 import os
 from datetime import datetime
 from data_frames.scalerizer import scalerize
-from data_frames.quantizer import bin
+from sklearn.preprocessing import KBinsDiscretizer
+# from data_frames.quantizer import bin
 
 
 class Quantize:
@@ -14,10 +15,11 @@ class Quantize:
             power_transform: bool=False
     ):
         # Store the original parameters for saving/loading
+        self.kbd = None
         self.robust_scaler = robust_scaler
         self.power_transform = power_transform
         
-        self.transformer = bin()
+        # self.transformer = bin()
         self._is_fitted = False
         self.feature_cols: list[str] = []
         self.num_rows = 0
@@ -38,10 +40,34 @@ class Quantize:
         if len(numeric_cols) == 0:
             raise ValueError("No numeric columns to transform.")
         
+        # Apply preprocessing (scaling, power transform, etc.)
         scaled_df = scalerize(df, self.robust_scaler, self.power_transform)
-        X_bin = self.transformer.fit_transform(scaled_df) 
-
+        
+        # Handle any remaining NaN values that might have been introduced
+        if scaled_df.isna().any().any():
+            # Use median imputation for any remaining NaN values
+            from sklearn.impute import SimpleImputer
+            imputer = SimpleImputer(strategy="median")
+            scaled_df = pd.DataFrame(
+                imputer.fit_transform(scaled_df),
+                index=scaled_df.index,
+                columns=scaled_df.columns
+            )
+        
+        # Fit the KBinsDiscretizer
         n_bins = 256
+        self.kbd = KBinsDiscretizer(
+            n_bins=n_bins, 
+            encode='ordinal', 
+            strategy='quantile', 
+            quantile_method='averaged_inverted_cdf'
+        )
+        
+        # Fit and transform the data
+        X_bin = self.kbd.fit_transform(scaled_df)
+        
+        # Convert to integer and shift to center around 0
+        # This ensures we get values from -127 to 128 (256 bins total)
         X_bin = X_bin.astype(int) - (n_bins // 2 - 1)
         
         self._is_fitted = True
@@ -52,7 +78,7 @@ class Quantize:
             index=df.index,
             columns=self.feature_cols
         )
-
+    
     def save(self, model_dir: str):
         """
         Save the fitted pipeline and related metadata to a directory.
@@ -75,7 +101,7 @@ class Quantize:
         # Save the fitted pipeline to a joblib file
         # This serializes the entire pipeline object including all fitted transformers
         pipeline_path = os.path.join(model_dir, "pipeline.joblib") #creates a file path 
-        joblib.dump(self.transformer, pipeline_path) #converts pipeline object into binary data to that file with median, etc
+        joblib.dump(self.kbd, pipeline_path) #converts pipeline object into binary data to that file with median, etc
 
         # Create metadata dictionary containing all the important attributes
         # This includes the configuration parameters and fitted state information
@@ -135,7 +161,7 @@ class Quantize:
         )
         
         # Restore the fitted pipeline and other attributes
-        obj.transformer = pipeline  # Restore the fitted transformer
+        obj.kbd = pipeline  # Restore the fitted transformer
         obj.feature_cols = metadata.get("feature_cols", [])  # Restore the feature column names
         obj._is_fitted = metadata.get("_is_fitted", False)  # Restore the fitted state
         
@@ -158,7 +184,11 @@ class Quantize:
        
         # Apply the same preprocessing that was used during fitting
         scaled_df = scalerize(df[numeric_cols], self.robust_scaler, self.power_transform)
-        X_new = self.transformer.transform(scaled_df)
+        X_new = self.kbd.transform(scaled_df)
+        
+        # Apply the same transformation as in fit method
+        n_bins = 256
+        X_new = X_new.astype(int) - (n_bins // 2 - 1)
         
         return pd.DataFrame(
             X_new,
