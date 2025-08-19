@@ -1,16 +1,9 @@
 import pandas as pd
-from data_frames.scale import Scale
+from data_frames.transformers.scale import Scale
+from data_frames.transformers.build_typed_transformer import build_typed_transformer
 
-# Load the saved transformer from S3
-mordred = Scale.load(
-    model_id="eos78ao",
-    transformer_type="robust_scaler",
-    bucket_name="ersilia-dataframes"
-)
-
-# Example: run inference on new data
-# (make sure df_new has the exact feature columns used in training)
-df_new = pd.read_csv("Drugbank/drugbank_outputc5.csv")
-df_scaled = mordred.inference(df_new)
-
-print(df_scaled.head())
+df_train = pd.read_csv("files/first_500_output.csv")
+X = df_train.drop(columns=["key","input"], errors="ignore")
+preproc, groups = build_typed_transformer(X)
+preproc.fit(X)    # persist with joblib.dump(preproc, "eos78ao_typed_preproc.joblib")
+X_trans = preproc.transform(X)
