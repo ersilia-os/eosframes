@@ -10,7 +10,7 @@ mordred = Scale.load(
 
 # Example: run inference on new data
 # (make sure df_new has the exact feature columns used in training)
-df_new = pd.read_csv("drugbank_outputc5.csv")
+df_new = pd.read_csv("Drugbank/drugbank_outputc5.csv")
 df_scaled = mordred.inference(df_new)
 
 print(df_scaled.head())
