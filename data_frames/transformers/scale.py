@@ -5,8 +5,8 @@ import os
 import tempfile
 import boto3
 from datetime import datetime
-from data_frames.scaler import make_scaler
-from data_frames.save_to_s3 import save_to_s3
+from data_frames.transformers.scaler import make_scaler
+from data_frames.transformers.save_to_s3 import save_to_s3
 
 
 class Scale():
