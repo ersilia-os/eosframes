@@ -1,5 +1,7 @@
 drugbank_output.csv
-
+.ipynb_checkpoints
+.jupyter.ystore.db
+modred.pkl
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
