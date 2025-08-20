@@ -3,6 +3,7 @@ import pandas as pd
 from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import OneHotEncoder, StandardScaler, FunctionTransformer, QuantileTransformer, PowerTransformer
 from sklearn.pipeline import Pipeline
+from sklearn.impute import SimpleImputer
 
 # ---------- Helper functions (no lambdas, so joblib can pickle) ----------
 def log1p_transform(x):
@@ -16,6 +17,7 @@ def identity(x):
 def build_typed_transformer(df: pd.DataFrame):
     # Heuristics to group columns
     numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+
 
     # Binary (0/1) columns
     bin_cols = [c for c in numeric_cols if df[c].dropna().isin([0, 1]).all()]
