@@ -7,6 +7,7 @@ import boto3
 from datetime import datetime
 from data_frames.transformers.build_typed_transformer import build_typed_transformer
 from data_frames.transformers.save_to_s3 import save_to_s3
+from sklearn.impute import SimpleImputer
 
 
 class Scale():
@@ -33,6 +34,10 @@ class Scale():
         numeric_cols = df.select_dtypes(include="number").columns.tolist()
         if len(numeric_cols) == 0:
             raise ValueError("No numeric columnds to transform.")
+        
+        #added line to scale fit 
+        imputer = SimpleImputer(strategy="median")
+        df = pd.DataFrame(imputer.fit_transform(df), index=df.index, columns=df.columns)
 
         self.feature_cols = list(numeric_cols)
         self.pipeline_ = build_typed_transformer(df)
