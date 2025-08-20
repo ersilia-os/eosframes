@@ -5,22 +5,16 @@ import os
 import tempfile
 import boto3
 from datetime import datetime
-from data_frames.transformers.scaler import make_scaler
+from data_frames.transformers.build_typed_transformer import build_typed_transformer
 from data_frames.transformers.save_to_s3 import save_to_s3
 
 
 class Scale():
     def __init__(
-        self, model_id: str, robust_scaler: bool = False, power_transform: bool = False
-    ):
+        self, model_id: str):
         # Store the original parameters for saving/loading
         self.model_id = model_id
-        self.robust_scaler = robust_scaler
-        self.power_transform = power_transform
-
-        self.pipeline_ = make_scaler(
-            power_transform=power_transform, robust_scaler=robust_scaler
-        )
+        self.pipeline_ = None
         self.feature_cols: list[str] = []
         self.num_rows = 0
 
@@ -41,9 +35,11 @@ class Scale():
             raise ValueError("No numeric columnds to transform.")
 
         self.feature_cols = list(numeric_cols)
-        X_trans = self.pipeline_.fit_transform(df[self.feature_cols])
+        self.pipeline_ = build_typed_transformer(df)
+        # self.pipeline_ = result[0]
+        transformed = self.pipeline_.fit_transform(df)
 
-        return pd.DataFrame(X_trans, index=df.index, columns=self.feature_cols)
+        return pd.DataFrame(transformed)
 
     # Zimin save/load changes
 
@@ -74,8 +70,6 @@ class Scale():
         # Create metadata dictionary containing all the important attributes
         # This includes the configuration parameters and fitted state information
         metadata = {
-            "robust_scaler": self.robust_scaler,  # Use the stored robust_scaler
-            "power_transform": self.power_transform,  # Use the stored power_transform
             "feature_cols": self.feature_cols,  # Save the feature column names that were used during fitting
             "fit_date": self.fit_timestamp.strftime("%Y-%m-%d")
             if hasattr(self, "fit_timestamp")
@@ -97,8 +91,6 @@ class Scale():
             model_id=self.model_id,
             metadata=metadata,
             pipeline=self.pipeline_,
-            robust_scaler=self.robust_scaler,
-            power_transform=self.power_transform,
             bucket_name="ersilia-dataframes",
         )
 
@@ -106,7 +98,6 @@ class Scale():
     def load(
         cls,
         model_id: str,
-        transformer_type: str,
         *,
         bucket_name: str | None = None,
         model_dir: str | None = None,
@@ -124,19 +115,15 @@ class Scale():
         Returns:
             Scale: instance with pipeline and metadata restored.
         """
-        valid = {"robust_scaler", "power_transform", "none"}
-        if transformer_type not in valid:
-            raise ValueError(f"transformer_type must be one of {valid}")
-
         # Resolve source of metadata/pipeline files
         if bucket_name:
             # Download from S3 into a temp directory
             s3 = boto3.client("s3")
-            tmpdir = tempfile.mkdtemp(prefix=f"{model_id}_{transformer_type}_")
+            tmpdir = tempfile.mkdtemp(prefix=f"{model_id}")
             pipeline_path = os.path.join(tmpdir, "pipeline.joblib")
             meta_path = os.path.join(tmpdir, "metadata.json")
 
-            prefix = f"{model_id}/{transformer_type}"
+            prefix = f"{model_id}"
             s3.download_file(bucket_name, f"{prefix}/pipeline.joblib", pipeline_path)
             s3.download_file(bucket_name, f"{prefix}/metadata.json", meta_path)
 
@@ -157,15 +144,9 @@ class Scale():
         with open(meta_path, "r") as f:
             metadata = json.load(f)
 
-        # Construct flags from requested transformer_type
-        robust_scaler = transformer_type == "robust_scaler"
-        power_transform = transformer_type == "power_transform"
-
         # Instantiate and restore
         obj = cls(
             model_id=model_id,
-            robust_scaler=robust_scaler,
-            power_transform=power_transform,
         )
         obj.pipeline_ = pipeline
         obj.feature_cols = metadata.get("feature_cols", [])
