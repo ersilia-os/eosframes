@@ -11,9 +11,9 @@ conda activate my_env
 ```
 Then install the package using pip:
 
-'''bash
+```bash
 pip install git+https://github.com/ersilia-os/data-frames.git
-'''
+```
 
 ## About the Ersilia Open Source Initiative
 
