@@ -1,13 +1,6 @@
 # data-frames
 data-frames is a Python package for fitting data transformation pipelines and applying them to new datasets. It is built for reproducible preprocessing of numeric data—including median imputation, robust scaling, Yeo-Johnson power transforms, and quantization.
 
-## Features
- - **Fit & Save Pipelines**: Train a transformation pipeline on one dataset, then save and reuse it on new data.
- - **Robust Scaling**: Reduce the influence of outliers using 'RobustScaler'.
- - **Power Transformation**: Stabilize variance and make data more Gaussian-like with Yeo-Johnson transforms.
- - **Quantization**: Convert continuous features into evenly-spcaed bins.
- - **Integration with pandas**: Works directly on 'DataFrame' objects
-
  ## Installation
 
  To get started, create a Conda environment:
