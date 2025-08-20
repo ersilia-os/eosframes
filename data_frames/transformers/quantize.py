@@ -7,6 +7,7 @@ from data_frames.transformers.scalerizer import scalerize
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import KBinsDiscretizer
 from data_frames.transformers.build_quantize_transformer import build_quantizer
+from data_frames.transformers.build_typed_transformer import build_typed_transformer
 # from data_frames.quantizer import bin
 
 
@@ -42,20 +43,17 @@ class Quantize:
         if len(numeric_cols) == 0:
             raise ValueError("No numeric columns to transform.")
         
-        # Apply preprocessing (scaling, power transform, etc.)
-        scaled_df = scalerize(df, self.robust_scaler, self.power_transform)
+        # impute missing values 
+        imputer = SimpleImputer(strategy="median")
+        df = pd.DataFrame(imputer.fit_transform(df), index=df.index, columns=df.columns)
         
-        # Handle any remaining NaN values that might have been introduced
-        if scaled_df.isna().any().any():
-            # Use median imputation for any remaining NaN values
-            imputer = SimpleImputer(strategy="median")
-            scaled_df = pd.DataFrame(
-                imputer.fit_transform(scaled_df),
-                index=scaled_df.index,
-                columns=scaled_df.columns
-            )
+        # scale data
+        scaler = build_typed_transformer(df)
+        scaled_data = scaler.fit_transform(df)
+        scaled_df = pd.DataFrame(transformed)
+
         #new code
-        self.kbd, X_bin  = build_quantizer()
+        self.kbd, X_bin  = build_quantizer(scaled_df)
         # Fit the KBinsDiscretizer
         n_bins = 256
         self.kbd = KBinsDiscretizer(
