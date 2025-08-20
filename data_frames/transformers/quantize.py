@@ -21,7 +21,7 @@ class Quantize:
         self.kbd = None
         self.robust_scaler = robust_scaler
         self.power_transform = power_transform
-        
+        self.pipeline_ = None
         # self.transformer = bin()
         self._is_fitted = False
         self.feature_cols: list[str] = []
@@ -37,38 +37,44 @@ class Quantize:
         
         # Capture the timestamp when fit was called
         self.fit_timestamp = datetime.now()
+
+        # impute missing values 
+        imputer = SimpleImputer(strategy="median")
+        df = pd.DataFrame(imputer.fit_transform(df), index=df.index, columns=df.columns)
         
         # Ensure only numeric columns
         numeric_cols = df.select_dtypes(include="number").columns
         if len(numeric_cols) == 0:
             raise ValueError("No numeric columns to transform.")
         
-        # impute missing values 
-        imputer = SimpleImputer(strategy="median")
-        df = pd.DataFrame(imputer.fit_transform(df), index=df.index, columns=df.columns)
-        
         # scale data
         scaler = build_typed_transformer(df)
         scaled_data = scaler.fit_transform(df)
-        scaled_df = pd.DataFrame(transformed)
+        scaled_df = pd.DataFrame(scaled_data)
 
         #new code
-        self.kbd, X_bin  = build_quantizer(scaled_df)
-        # Fit the KBinsDiscretizer
-        n_bins = 256
-        self.kbd = KBinsDiscretizer(
-            n_bins=n_bins, 
-            encode='ordinal', 
-            strategy='quantile', 
-            quantile_method='averaged_inverted_cdf'
-        )
+        self.pipeline_ = build_quantizer(scaled_df)
+        self.pipeline_.fit_transform(scaled_df)
+
+        #old code
+        ###
+        # self.kbd, X_bin  = build_quantizer(scaled_df)
+        # # Fit the KBinsDiscretizer
+        # n_bins = 256
+        # self.kbd = KBinsDiscretizer(
+        #     n_bins=n_bins, 
+        #     encode='ordinal', 
+        #     strategy='quantile', 
+        #     quantile_method='averaged_inverted_cdf'
+        # )
         
-        # Fit and transform the data
-        X_bin = self.kbd.fit_transform(scaled_df)
+        # # Fit and transform the data
+        # X_bin = self.kbd.fit_transform(scaled_df)
         
-        # Convert to integer and shift to center around 0
-        # This ensures we get values from -127 to 128 (256 bins total)
-        X_bin = X_bin.astype(int) - (n_bins // 2 - 1)
+        # # Convert to integer and shift to center around 0
+        # # This ensures we get values from -127 to 128 (256 bins total)
+        # X_bin = X_bin.astype(int) - (n_bins // 2 - 1)
+        ###
         
         self._is_fitted = True
         self.feature_cols = list(numeric_cols)
