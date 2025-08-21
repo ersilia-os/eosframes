@@ -1,0 +1,11 @@
+{
+  "feature_cols": [
+    "abc",
+    "def",
+    "continuous"
+  ],
+  "fit_date": "2025-08-21",
+  "fit_time": "09:15:05",
+  "fit_timestamp": "2025-08-21T09:15:05.329203",
+  "num_rows": 20
+}

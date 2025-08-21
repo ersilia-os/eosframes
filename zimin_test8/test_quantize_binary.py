@@ -5,9 +5,10 @@ import matplotlib.pyplot as plt
 
 df = pd.read_csv("test_binary_constant_fit.csv")
 
-kbd = Quantize(robust_scaler=True, power_transform=False)
+kbd = Quantize(model_id="eos78ao")
 
 fitted_df = kbd.fit(df) 
+fitted_df.to_csv("test_fitted_binary.csv")
 # Save the model
 kbd.save('modred_dir')
 
