@@ -15,6 +15,12 @@ def identity(x):
 # -------------------------------------------------------------------------
 
 def build_typed_transformer(df: pd.DataFrame):
+
+    # Replace constant columns with 0
+    constant_cols = [c for c in df.columns if df[c].nunique(dropna=False) <= 1]
+    df = df.copy()
+    df[constant_cols] = 0
+    
     # Heuristics to group columns
     numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
 
