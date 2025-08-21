@@ -210,7 +210,7 @@ class Quantize:
 
         return obj
     
-    def inference(self, df: pd.DataFrame) -> pd.DataFrame:
+    def transform(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Transform new data with the already-fitted pipeline
         """

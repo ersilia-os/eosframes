@@ -17,5 +17,5 @@ loaded_kbd = kbd.load('modred_dir')
 # Use the loaded model for inference
 df_inference = pd.read_csv("test_binary_constant.csv")
 
-result = loaded_kbd.inference(df_inference)
+result = loaded_kbd.transform(df_inference)
 result.to_csv('binary-def-contin.csv', index=False)
