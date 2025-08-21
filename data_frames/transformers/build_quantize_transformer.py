@@ -3,6 +3,16 @@ import pandas as pd
 from sklearn.pipeline import Pipeline
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import FunctionTransformer, QuantileTransformer
+
+# -------- helpers (pickle-safe, no lambdas) --------
+def _unit_to_int255(x: np.ndarray) -> np.ndarray:
+    """
+    Assume x in [0,1]. Map 0 -> -127, 1 -> 127 (255 levels).
+    """
+    y = np.rint(-127.0 + 254.0 * x)
+    y = np.clip(y, -127, 127)
+    return y.astype(np.int16)
 
 
 
@@ -40,6 +50,7 @@ class EvenlySpacedDiscreteMapper(BaseEstimator, TransformerMixin):
             self.map_ = {u: int(np.rint(c)) for u, c in zip(self.uniques_, codes)}
         return self
 
+
     def transform(self, X):
         s = pd.Series(np.asarray(X).ravel())
         mapped = s.map(self.map_)
@@ -52,12 +63,35 @@ class EvenlySpacedDiscreteMapper(BaseEstimator, TransformerMixin):
             mapped = mapped.where(mapped.notna(), s.apply(nearest_code))
         return mapped.to_numpy(dtype=np.int16).reshape(-1, 1)
 
+def _quantile_uniform_then_int(n_rows: int) -> Pipeline:
+    """
+    Equal-frequency transform to uniform [0,1], then map to [-127,127].
+    """
+    n_q = int(min(1000, max(10, n_rows // 3)))  # stable default
+    return Pipeline([
+        ("qt", QuantileTransformer(
+            output_distribution="uniform",
+            n_quantiles=n_q,
+            subsample=int(1e6),
+            copy=True,
+            random_state=0
+        )),
+        ("to_int", FunctionTransformer(_unit_to_int255, validate=False)),
+    ])
+
 def build_quantizer(df: pd.DataFrame):
     numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
 
     # Binary (0/1) columns
     bin_cols = [c for c in numeric_cols
                 if df[c].dropna().isin([0,1]).all()]
+    
+    small_int_cols = [
+        c for c in numeric_cols
+        if pd.api.types.is_integer_dtype(df[c])
+        and df[c].nunique(dropna=True) <= 10
+        and c not in bin_cols
+    ]
     
     # Small-cardinality integers (<=10 unique, integer dtype)
     # small_int_cols = [c for c in numeric_cols
@@ -76,18 +110,19 @@ def build_quantizer(df: pd.DataFrame):
     # The rest of continuous numerics (floats etc.)
     continuous_cols = list(
         set(numeric_cols)
-         - set(bin_cols))
-        #  - set(small_int_cols) 
+         - set(bin_cols)
+         - set(small_int_cols))
         #  - set(count_cols) - set(bounded_cols))
 
     
     binary_pipe = BinaryToExtremes()
+    small_int_pipe = EvenlySpacedDiscreteMapper()
     continuous_pipe = _quantile_uniform_then_int(len(df))
 
 
     preproc = ColumnTransformer(
         transformers=[
-            ("bin_to_extremes",   bin_pipe,          bin_cols),
+            ("bin_to_extremes",   binary_pipe,          bin_cols),
             ("small_int_even",    small_int_pipe,    small_int_cols),
             ("continuous_quant",  continuous_pipe,   continuous_cols),
         ],

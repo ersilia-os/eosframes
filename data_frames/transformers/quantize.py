@@ -54,7 +54,7 @@ class Quantize:
 
         #new code
         self.pipeline_ = build_quantizer(scaled_df)
-        self.pipeline_.fit_transform(scaled_df)
+        X_bin = self.pipeline_.fit_transform(scaled_df)
 
         #old code
         ###
@@ -189,12 +189,13 @@ class Quantize:
             raise ValueError("No numeric columns to transform.")
        
         # Apply the same preprocessing that was used during fitting
-        scaled_df = scalerize(df[numeric_cols], self.robust_scaler, self.power_transform)
-        X_new = self.kbd.transform(scaled_df)
-        
-        # Apply the same transformation as in fit method
-        n_bins = 256
-        X_new = X_new.astype(int) - (n_bins // 2 - 1)
+        # scale data
+        scaler = build_typed_transformer(df)
+        scaled_data = scaler.fit_transform(df)
+        scaled_df = pd.DataFrame(scaled_data)
+
+        #new code
+        X_new = self.pipeline_.transform(scaled_df)
         
         return pd.DataFrame(
             X_new,

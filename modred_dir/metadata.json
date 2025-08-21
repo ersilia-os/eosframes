@@ -1,0 +1,13 @@
+{
+  "robust_scaler": true,
+  "power_transform": false,
+  "feature_cols": [
+    "abc",
+    "def",
+    "continuous"
+  ],
+  "fit_date": "2025-08-20",
+  "fit_time": "22:39:56",
+  "fit_timestamp": "2025-08-20T22:39:56.411954",
+  "num_rows": 20
+}
