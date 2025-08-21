@@ -48,7 +48,7 @@ class Scale():
 
     # Zimin save/load changes
 
-    def save(self):
+    def save(self, dir_name=None, local=False):
         """
         Save the fitted pipeline and related metadata to a directory.
 
@@ -59,18 +59,7 @@ class Scale():
         Raises:
             ValueError: If the model hasn't been fitted yet.
         """
-        # Create the model directory if it doesn't exist
-        if not os.path.exists(self.model_id):
-            os.makedirs(self.model_id)
-
-        # Save the fitted pipeline to a joblib file
-        # This serializes the entire pipeline object including all fitted transformers
-        pipeline_path = os.path.join(
-            self.model_id, "pipeline.joblib"
-        )  # creates a file path
-        joblib.dump(
-            self.pipeline_, pipeline_path
-        )  # converts pipeline object into binary data to that file with median, etc
+        save_dir = dir_name or self.model_id
 
         # Create metadata dictionary containing all the important attributes
         # This includes the configuration parameters and fitted state information
@@ -87,13 +76,22 @@ class Scale():
             else None,
             "num_rows": self.num_rows,
         }
+        if local:
+            # Create the model directory if it doesn't exist
+            os.makedirs(save_dir, exist_ok=True)
 
-        # Save the metadata as a JSON file for easy reading and debugging
-        meta_path = os.path.join(self.model_id, "metadata.json")
-        with open(meta_path, "w") as f:
-            json.dump(metadata, f, indent=2)  # Use indent=2 for pretty formatting
+            # Save the fitted pipeline to a joblib file
+            # This serializes the entire pipeline object including all fitted transformers
+            pipeline_path = os.path.join(save_dir, "pipeline.joblib")  
+            joblib.dump(self.pipeline_, pipeline_path)
+
+            # Save the metadata as a JSON file for easy reading and debugging
+            meta_path = os.path.join(save_dir, "metadata.json")
+            with open(meta_path, "w") as f:
+                json.dump(metadata, f, indent=2)
+
         save_to_s3(
-            model_id=self.model_id,
+            dir_name=save_dir,
             metadata=metadata,
             pipeline=self.pipeline_,
             bucket_name="ersilia-dataframes",
