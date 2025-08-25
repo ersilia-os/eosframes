@@ -20,7 +20,8 @@ class Quantize:
         self.model_id = model_id
         self.pipeline_ = None
         self.feature_cols: list[str] = []
-        self.num_rows = 0   
+        self.num_rows = 0  
+        self._is_fitted = False 
     # def __init__(
     #         self, model_id: str
     #         # robust_scaler: bool = False, 
@@ -48,18 +49,20 @@ class Quantize:
         # Capture the timestamp when fit was called
         self.fit_timestamp = datetime.now()
 
-        # impute missing values 
-        imputer = SimpleImputer(strategy="median")
-        df = pd.DataFrame(imputer.fit_transform(df), index=df.index, columns=df.columns)
-        
-        # Ensure only numeric columns
-        numeric_cols = df.select_dtypes(include="number").columns
+        #only transform the columns with numeric values
+        numeric_cols = df.select_dtypes(include="number").columns.tolist()
         if len(numeric_cols) == 0:
             raise ValueError("No numeric columns to transform.")
+        numeric_df = df.select_dtypes(include="number")
+        numeric_df = numeric_df.apply(pd.to_numeric, errors="coerce")
+
+        # impute missing values 
+        imputer = SimpleImputer(strategy="median")
+        X_num = pd.DataFrame(imputer.fit_transform(numeric_df), index=numeric_df.index, columns=numeric_df.columns)
         
         # scale data
-        scaler = build_typed_transformer(df)
-        scaled_data = scaler.fit_transform(df)
+        scaler = build_typed_transformer(X_num)
+        scaled_data = scaler.fit_transform(X_num)
         scaled_df = pd.DataFrame(scaled_data)
 
         #new code
@@ -214,20 +217,37 @@ class Quantize:
         """
         Transform new data with the already-fitted pipeline
         """
-        # if not self._is_fitted:
-        #     raise RuntimeError("You must call .fit() before .inference()")
+        if not self._is_fitted:
+            raise RuntimeError("❌ Model not fitted. Call .fit() before .inference().")
         
-        numeric_cols = df.select_dtypes(include="number").columns
-        if len(numeric_cols) == 0:
-            raise ValueError("No numeric columns to transform.")
+        if not self.feature_cols:
+            raise RuntimeError(
+                "❌ Trained feature_cols are empty. Error with save and load methods of the transformer.."
+            )
+
+         # Check for missing trained columns
+        missing = [c for c in self.feature_cols if c not in df.columns]
+        if missing:
+            raise ValueError(
+                f"❌ Inference data is missing trained columns: {missing}. "
+                f"Expected exactly these columns (in order): {self.feature_cols}"
+            )
+        
+        # numeric_cols = df.select_dtypes(include="number").columns
+        # if len(numeric_cols) == 0:
+        #     raise ValueError("No numeric columns to transform.")
        
-        # Apply the same preprocessing that was used during fitting
-        # scale data
+        X = df.reindex(self.feature_cols)
+        X = X.apply(pd.to_numeric, errors="coerce")
+
+        imputer = SimpleImputer(strategy="median")
+        df = pd.DataFrame(imputer.fit_transform(df), index=df.index, columns=df.columns)
+
+        # Apply the same preprocessing(scale/normalize data) that was used during fitting
         scaler = build_typed_transformer(df)
         scaled_data = scaler.fit_transform(df)
         scaled_df = pd.DataFrame(scaled_data)
 
-        #new code
         X_new = self.pipeline_.transform(scaled_df)
         
         return pd.DataFrame(
