@@ -3,7 +3,6 @@ import joblib
 import json
 import os
 from datetime import datetime
-from data_frames.transformers.scalerizer import scalerize
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import KBinsDiscretizer
 from data_frames.transformers.build_quantize_transformer import build_quantizer
