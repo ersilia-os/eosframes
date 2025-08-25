@@ -18,11 +18,12 @@ class Scale():
         self.pipeline_ = None
         self.feature_cols: list[str] = []
         self.num_rows = 0
+        self._is_fitted = False 
 
     def fit(self, df: pd.DataFrame) -> pd.DataFrame:
         # Check if the DataFrame is empty
         if df.empty:
-            raise ValueError("Input DataFrame is empty.")
+            raise ValueError("❌ Input DataFrame is empty.")
 
         # Set the number of rows
         self.num_rows = len(df)
@@ -30,23 +31,25 @@ class Scale():
         # Capture the timestamp when fit was called
         self.fit_timestamp = datetime.now()
 
+        #need to ensure numeric columns before imputing: imputing fails on NaNs
         # Ensure only numeric columns
         numeric_cols = df.select_dtypes(include="number").columns.tolist()
-        if len(numeric_cols) == 0:
-            raise ValueError("No numeric columnds to transform.")
-        
-        #added line to scale fit 
-        imputer = SimpleImputer(strategy="median")
-        df = pd.DataFrame(imputer.fit_transform(df), index=df.index, columns=df.columns)
-
         self.feature_cols = list(numeric_cols)
-        self.pipeline_ = build_typed_transformer(df)
-        # self.pipeline_ = result[0]
-        transformed = self.pipeline_.fit_transform(df)
+        if len(numeric_cols) == 0:
+            raise ValueError("❌ No numeric columns to transform.")
+        numeric_df = df.select_dtypes(include="number")
+        numeric_df = numeric_df.apply(pd.to_numeric, errors="coerce")
+
+        # impute missing values 
+        imputer = SimpleImputer(strategy="median")
+        X_num = pd.DataFrame(imputer.fit_transform(numeric_df), index=numeric_df.index, columns=numeric_df.columns)
+
+        self.pipeline_ = build_typed_transformer(X_num)
+        transformed = self.pipeline_.fit_transform(X_num)
+
+        self._is_fitted = True
 
         return pd.DataFrame(transformed)
-
-    # Zimin save/load changes
 
     def save(self, dir_name=None, local=False):
         """
@@ -161,13 +164,16 @@ class Scale():
 
         return obj
 
-    def inference(self, df: pd.DataFrame) -> pd.DataFrame:
+    def transform(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Transform new data with the already-fitted pipeline
         """
+        if not self._is_fitted:
+            raise RuntimeError("❌ Model not fitted. Call .fit() before .inference().")
+
         if not self.feature_cols:
             raise RuntimeError(
-                "Trained feature_cols are empty; was the model saved correctly?"
+                "❌Trained feature_cols are empty. Error with save and load methods of the transformer..."
             )
 
         # Check for missing trained columns
