@@ -5,13 +5,13 @@ import os
 
 
 def save_to_s3(
-    model_id,
+    dir_name,
     metadata,
     pipeline,
     bucket_name="your-bucket-name",
 ):
     # Build S3 folder path: model_id/transform_type/
-    s3_prefix = f"{model_id}"
+    s3_prefix = f"{dir_name}"
 
     # Save locally first
     metadata_path = "metadata.json"

@@ -1,4 +1,5 @@
 *.csv
+*.env
 .ipynb_checkpoints
 .jupyter_ystore.db
 modred.pkl
