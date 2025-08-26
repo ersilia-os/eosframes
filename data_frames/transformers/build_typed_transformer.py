@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 from sklearn.compose import ColumnTransformer
-from sklearn.preprocessing import OneHotEncoder, StandardScaler, FunctionTransformer, QuantileTransformer, PowerTransformer
+from sklearn.preprocessing import StandardScaler,  QuantileTransformer, RobustScaler, MinMaxScaler
 from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer
 
@@ -29,18 +29,18 @@ def build_typed_transformer(df: pd.DataFrame):
     bin_cols = [c for c in numeric_cols if df[c].dropna().isin([0, 1]).all()]
 
     # Small-cardinality integers (<=10 unique, integer dtype)
-    small_int_cols = [
-        c for c in numeric_cols
-        if pd.api.types.is_integer_dtype(df[c])
-        and df[c].nunique(dropna=True) <= 10
-        and c not in bin_cols
-    ]
+    # small_int_cols = [
+    #     c for c in numeric_cols
+    #     if pd.api.types.is_integer_dtype(df[c])
+    #     and df[c].nunique(dropna=True) <= 10
+    #     and c not in bin_cols
+    # ]
 
     # Count-like (non-negative integers with wider range)
     count_cols = [
         c for c in numeric_cols
         if pd.api.types.is_integer_dtype(df[c])
-        and c not in bin_cols + small_int_cols
+        and c not in bin_cols 
         and df[c].min() >= 0
     ]
 
@@ -54,19 +54,24 @@ def build_typed_transformer(df: pd.DataFrame):
     continuous_cols = list(
         set(numeric_cols)
         - set(bin_cols)
-        - set(small_int_cols)
+        # - set(small_int_cols)
         - set(count_cols)
         - set(bounded_cols)
     )
 
     # Transformers
-    log1p_then_scale = Pipeline([
-        ("log1p", FunctionTransformer(log1p_transform, validate=False)),
-        ("scale", StandardScaler(with_mean=True))
+    # log1p_then_scale = Pipeline([
+    #     ("log1p", FunctionTransformer(log1p_transform, validate=False)),
+    #     ("scale", StandardScaler(with_mean=True))
+    # ])
+    minmax_scaler = Pipeline([
+    ("mm", MinMaxScaler(feature_range=(0, 1)))
     ])
-
-    yeojohnson_then_scale = Pipeline([
-        ("yj", PowerTransformer(method="yeo-johnson", standardize=True))
+    # yeojohnson_then_scale = Pipeline([
+    #     ("yj", PowerTransformer(method="yeo-johnson", standardize=True))
+    # ])
+    robust_scaler = Pipeline([
+    ("rs", RobustScaler(with_centering=True, with_scaling=True, quantile_range=(25.0, 75.0)))
     ])
 
     quantile_normal = Pipeline([
@@ -80,10 +85,10 @@ def build_typed_transformer(df: pd.DataFrame):
     preproc = ColumnTransformer(
         transformers=[
             ("bin_passthrough", "passthrough", bin_cols),
-            ("small_int_ohe", OneHotEncoder(handle_unknown="ignore", sparse_output=False), small_int_cols),
-            ("count_logscale", log1p_then_scale, count_cols),
+            # ("small_int_ohe", OneHotEncoder(handle_unknown="ignore", sparse_output=False), small_int_cols),
+            ("count_logscale", minmax_scaler, count_cols),
             ("bounded_quantile", quantile_normal, bounded_cols),
-            ("continuous_yj", yeojohnson_then_scale, continuous_cols),
+            ("continuous_rs", robust_scaler, continuous_cols),
         ],
         remainder="drop"
     )
