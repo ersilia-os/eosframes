@@ -97,7 +97,6 @@ class Scale():
             dir_name=save_dir,
             metadata=metadata,
             pipeline=self.pipeline_,
-            bucket_name="ersilia-dataframes",
         )
 
     @classmethod
