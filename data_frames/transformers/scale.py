@@ -19,6 +19,7 @@ class Scale():
         self.feature_cols: list[str] = []
         self.num_rows = 0
         self._is_fitted = False 
+        self.empty: list[str] = []
 
     def fit(self, df: pd.DataFrame) -> pd.DataFrame:
         # Check if the DataFrame is empty
@@ -34,10 +35,17 @@ class Scale():
         #need to ensure numeric columns before imputing: imputing fails on NaNs
         # Ensure only numeric columns
         numeric_cols = df.select_dtypes(include="number").columns.tolist()
-        self.feature_cols = list(numeric_cols)
-        if len(numeric_cols) == 0:
-            raise ValueError("❌ No numeric columns to transform.")
-        numeric_df = df.select_dtypes(include="number")
+        for col in numeric_cols:
+            frac_missing = df[col].isna().mean()
+            if frac_missing >= 0.25:
+                self.empty.append(col)
+            else:
+                self.feature_cols.append(col)
+        
+        if len(self.feature_cols) == 0:
+            raise ValueError("❌ No numeric columns or non empty columns to transform.")
+        
+        numeric_df = df.reindex(columns=self.feature_cols)
         numeric_df = numeric_df.apply(pd.to_numeric, errors="coerce")
 
         # impute missing values 
@@ -50,7 +58,7 @@ class Scale():
         self._is_fitted = True
 
         return pd.DataFrame(transformed)
-
+        
     def save(self, dir_name=None, local=False):
         """
         Save the fitted pipeline and related metadata to a directory.
@@ -68,7 +76,8 @@ class Scale():
         # This includes the configuration parameters and fitted state information
         metadata = {
             "feature_cols": self.feature_cols,  # Save the feature column names that were used during fitting
-            "fit_date": self.fit_timestamp.strftime("%Y-%m-%d")
+            "fit_date": self.fit_timestamp.strftime("%Y-%m-%d"),
+            "empty_skipped_cols": self.empty
             if hasattr(self, "fit_timestamp")
             else None,
             "fit_time": self.fit_timestamp.strftime("%H:%M:%S")
