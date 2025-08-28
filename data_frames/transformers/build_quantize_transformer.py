@@ -18,17 +18,18 @@ def _unit_to_int255(x: np.ndarray) -> np.ndarray:
 
 class BinaryToExtremes(BaseEstimator, TransformerMixin):
     """
-    Map binary-ish inputs to {-127, +127}.
-    Threshold at 0.5 so it’s robust to float dtype.
+    Map exact 0 -> -127 and 1 -> 127.
+    Assumes the input contains only 0 and 1 values.
     """
-    #this is required by scikit-learn api
+
     def fit(self, X, y=None):
         return self
+
     def transform(self, X):
-        #convert data into np array
-        #if values >= .5 --> 127
-        #if values <= .5 --> -127
-        return np.where(np.asarray(X, float) >= 0.5, 127, -127).astype(np.int16)
+        arr = np.asarray(X, dtype=int)  # ensure integers
+        # map: 0 → -127, 1 → 127
+        mapped = np.where(arr == 1, 127, -127)
+        return mapped
 
 #zimin needs to read through this 
 class EvenlySpacedDiscreteMapper(BaseEstimator, TransformerMixin):
