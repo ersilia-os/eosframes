@@ -5,9 +5,9 @@ import os
 from datetime import datetime
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import KBinsDiscretizer
-from data_frames.transformers.build_quantize_transformer import build_quantizer
-from data_frames.transformers.build_typed_transformer import build_typed_transformer
-from data_frames.transformers.save_to_s3 import save_to_s3
+from eosframes.transformers.build_quantize_transformer import build_quantizer
+from eosframes.transformers.build_typed_transformer import build_typed_transformer
+from eosframes.transformers.save_to_s3 import save_to_s3
 
 # from data_frames.quantizer import bin
 

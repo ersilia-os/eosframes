@@ -1,10 +1,11 @@
-[build-system]
-requires = ["setuptools>=42", "wheel"]
-build-backend = "setuptools.build_meta"
+[tool.poetry]
+name = "eosframes"
+version = "0.1.0"
+description = "Ersilia utilities for working with tabular output data"
+authors = ["Ersilia Open Source Initiative <hello@ersilia.io>"]
 
-[tool.setuptools.packages.find]
-where = ["src"]
+[tool.poetry.dependencies]
+python = ">=3.8"
 
-[tool.setuptools.packages.find]
-include = ["data_frames*"]
-exclude = ["data", "assets", "notebooks"]
+[tool.poetry.packages]
+include = "eosframes"
