@@ -1,8 +1,13 @@
+# Manually added
 *.csv
 *.env
 .ipynb_checkpoints
 .jupyter_ystore.db
 modred.pkl
+
+.DS_Store
+development.py
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

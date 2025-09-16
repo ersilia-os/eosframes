@@ -1,18 +1,18 @@
-# data-frames
-data-frames is a Python package for fitting data transformation pipelines and applying them to new datasets. It is built for reproducible preprocessing of numeric data—including median imputation, robust scaling, Yeo-Johnson power transforms, and quantization.
+# Ersilia output dataframes
+The eosframes package is a Python tool for manipulating [Ersilia](https://github.com/ersilia-os/ersilia)'s outputs.
 
  ## Installation
 
  To get started, create a Conda environment:
 
 ```bash
-conda create -n my_env python=3.12
-conda activate my_env
+conda create -n eosframes python=3.12
+conda activate eosframes
 ```
-Then install the package using pip:
+Then install the package using `pip`:
 
 ```bash
-pip install git+https://github.com/ersilia-os/data-frames.git
+pip install git+https://github.com/ersilia-os/eosframes.git
 ```
 
 ## Usage

@@ -6,6 +6,9 @@ authors = ["Ersilia Open Source Initiative <hello@ersilia.io>"]
 
 [tool.poetry.dependencies]
 python = ">=3.8"
+pandas = ">=2.0.0"
+h5py = ">=3.10.0"
+requests = ">=2.31"
 
 [tool.poetry.packages]
 include = "eosframes"
