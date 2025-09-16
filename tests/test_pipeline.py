@@ -2,7 +2,6 @@ from data_frames.scale import Scale
 import pandas as pd
 import joblib
 import matplotlib.pyplot as plt
-import boto3
 
 # 1. Fit on "training" DataFrame
 scaler = Scale(robust_scaler=True, power_transform=False)

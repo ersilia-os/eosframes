@@ -4,7 +4,6 @@ import json
 import os
 from datetime import datetime
 from sklearn.impute import SimpleImputer
-from sklearn.preprocessing import KBinsDiscretizer
 from eosframes.transformers.build_quantize_transformer import build_quantizer
 from eosframes.transformers.build_typed_transformer import build_typed_transformer
 from eosframes.transformers.save_to_s3 import save_to_s3

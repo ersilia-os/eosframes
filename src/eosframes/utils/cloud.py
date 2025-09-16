@@ -1,4 +1,3 @@
-import load_dotenv
 
 
 def get_aws_credentials():

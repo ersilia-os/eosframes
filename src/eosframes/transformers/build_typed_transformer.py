@@ -3,7 +3,6 @@ import pandas as pd
 from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import QuantileTransformer, RobustScaler, MinMaxScaler
 from sklearn.pipeline import Pipeline
-from sklearn.impute import SimpleImputer
 
 # ---------- Helper functions (no lambdas, so joblib can pickle) ----------
 def log1p_transform(x):

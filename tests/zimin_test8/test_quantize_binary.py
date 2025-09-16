@@ -1,7 +1,5 @@
 from data_frames.transformers.quantize import Quantize
 import pandas as pd
-import joblib
-import matplotlib.pyplot as plt
 
 df = pd.read_csv("test_binary_constant_fit.csv")
 

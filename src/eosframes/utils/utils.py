@@ -1,10 +1,29 @@
 import re
 import pandas as pd
-import numpy as np
 import requests
 
 
-def get_model_id_from_file_name(file_name: str) -> str:
+def chunker(df: pd.DataFrame, chunksize: int = 10000):
+    """
+    Generator that yields chunks of the input DataFrame.
+
+    Parameters
+    ----------
+    df: pd.DataFrame
+        The DataFrame to be chunked.
+    chunksize: int
+        The number of rows per chunk (default=10000).
+
+    Yields
+    ------
+    pd.DataFrame
+        A chunk of the original DataFrame.
+    """
+    for start in range(0, len(df), chunksize):
+        yield df.iloc[start:start + chunksize]
+
+
+def get_model_id_from_path(path: str) -> str:
     """
     Given a file name, extract the model identifier if it exists.
     
@@ -13,17 +32,15 @@ def get_model_id_from_file_name(file_name: str) -> str:
 
     Parameters
     ----------
-    file_name : str
-        The name of the file from which to extract the model identifier
+    path : str
+        The name of the file or folder from which to extract the model identifier
     
     Returns
     -------
     str
         The extracted model identifier if found, otherwise None
     """
-    if not file_name.endswith(".csv") and not file_name.endswith(".h5"):
-        raise Exception("File name must end with .csv or .h5")
-    text = file_name.split("/")[-1]
+    text = path.split("/")[-1]
     pattern = r'(?<![A-Za-z0-9])eos\d[A-Za-z0-9]{3}(?![A-Za-z0-9])'
     match = re.search(pattern, text)
     if match:
@@ -35,6 +52,16 @@ def get_model_id_from_file_name(file_name: str) -> str:
 def is_model_id_valid(model_id: str) -> bool:
     """
     Simple function to determine if a model identifier is valid or not.
+
+    Parameters
+    ----------
+    model_id : str
+        The model identifier to validate (e.g. "eos4e40").
+
+    Returns
+    -------
+    bool
+        True if the model identifier is valid, False otherwise.
     """
     if len(model_id) != 7:
         return False
@@ -66,7 +93,17 @@ def get_run_columns(model_id: str) -> pd.DataFrame:
 def get_model_slug(model_id: str) -> str:
     """
     Get the model slug from the GitHub README.md file in ersilia-os/{model_id}.
-    Assumes README.md contains a line like: `slug`: some-slug
+    Assumes README.md contains a line like: **Slug**: `some-slug`
+
+    Parameters
+    ----------
+    model_id : str
+        Repository name inside the ersilia-os org (e.g. "eos4e40")
+
+    Returns
+    -------
+    str
+        The model slug extracted from the README.md file
     """
     repo = model_id
     branch = "main"
@@ -85,6 +122,16 @@ def get_model_title(model_id: str) -> str:
     """
     Get the model title from the GitHub README.md file in ersilia-os/{model_id}.
     Assumes the README contains a line like: "# Title".
+
+    Parameters
+    ----------
+    model_id : str
+        Repository name inside the ersilia-os org (e.g. "eos4e40")
+    
+    Returns
+    -------
+    str
+        The model title extracted from the README.md file
     """
     repo = model_id
     branch = "main"
@@ -97,33 +144,3 @@ def get_model_title(model_id: str) -> str:
         return title
     except IndexError:
         raise ValueError(f"No title found in README.md for {model_id}")
-
-
-def resolve_datatype(df: pd.DataFrame, run_columns: pd.DataFrame):
-    """
-    Resolve the datatype of a given dataframe.
-    """
-    data_columns = run_columns["name"].tolist()
-    if any(data_columns != [c for c in df.columns.tolist() if c != {"key", "input"}]):
-        raise Exception("Columns do not match")
-    declared_dtype = set(df["type"].tolist())
-    if declared_dtype == {"string"}:
-        dtype = str
-        return df.astype(dtype), dtype
-    di = df[[c for c in df.columns.tolist() if c in {"key", "input"}]]
-    data = df[[c for c in df.columns.tolist() if c not in {"key", "input"}]]
-    if declared_dtype == {"integer"}:
-        min_v, max_v = np.min(data), np.max(data)
-        if any(data.isna()):
-            dtype = np.int16
-            return pd.concat([di, data.astype(dtype)], axis=1), dtype
-        if min_v >= -128 and max_v <= 127:
-            dtype = np.int8
-            return pd.concat([di, data.astype(dtype)], axis=1), dtype
-        else:
-            dtype = np.int16
-            return pd.concat([di, data.astype(dtype)], axis=1), dtype
-    if declared_dtype == {"float"} or declared_dtype == {"integer", "float"}:
-        dtype = np.float32
-        return pd.concat([di, data.astype(dtype)], axis=1), dtype
-

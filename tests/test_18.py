@@ -1,6 +1,5 @@
 import pandas as pd
 from data_frames.transformers.scale import Scale
-from data_frames.transformers.build_typed_transformer import build_typed_transformer
 
 df = pd.read_csv("test_missing_cols.csv")
 feature_cols = [c for c in df.columns if c not in ("key", "input")]
