@@ -2,10 +2,10 @@ import os
 import h5py
 import pandas as pd
 
-from ..utils.utils import chunker, get_model_id_from_path
+from ..utils.utils import chunker, get_model_id_from_path, is_model_id_valid, get_colors, get_model_slug, get_model_title, get_run_columns
 
 
-def write_csv(df: pd.DataFrame, file_path: str) -> None:
+def write_csv(df: pd.DataFrame, csv_path: str) -> None:
     """
     Save DataFrame as CSV file in Ersilia
     
@@ -20,11 +20,11 @@ def write_csv(df: pd.DataFrame, file_path: str) -> None:
     -------
     None
     """
-    if os.path.exists(file_path):
-        raise Exception("File {0} exists. Please remove it before saving".format(file_path))
-    if not file_path.endswith(".csv"):
-        raise Exception("File {0} must have a .csv extension".format(file_path))
-    model_id_0 = get_model_id_from_path(file_path)
+    if os.path.exists(csv_path):
+        raise Exception("File {0} exists. Please remove it before saving".format(csv_path))
+    if not csv_path.endswith(".csv"):
+        raise Exception("File {0} must have a .csv extension".format(csv_path))
+    model_id_0 = get_model_id_from_path(csv_path)
     if model_id_0 is None:
         raise Exception("Could not extract model_id from file name {0}! The file name must contain the model identifier".format(file_path))
     model_id_1 = getattr(df, "model_id", None)
@@ -33,7 +33,7 @@ def write_csv(df: pd.DataFrame, file_path: str) -> None:
     if model_id_0 != model_id_1:
         raise Exception("Model_id from file name ({0}) does not match model_id from DataFrame ({1})".format(model_id_0, model_id_1))
     df = df.reset_index(drop=True)
-    df.to_csv(file_path, index=False)
+    df.to_csv(csv_path, index=False)
 
 
 def write_h5(df: pd.DataFrame, h5_path: str, dtype: any) -> None:
@@ -120,19 +120,39 @@ def write_chunked_csvs(df: pd.DataFrame, dir_path: str, chunksize: int) -> None:
         chunk.to_csv(os.path.join(dir_path, file_name), index=False)
 
 
-def write_xlsx(df: pd.DataFrame, file_path: str) -> None:
+def write_xlsx(df: pd.DataFrame, xlsx_path: str) -> None:
     """
-    Save as spreadsheet.
+    Save dataframe as spreadsheet in Ersilia format.
+
+    Parameters
+    ----------
+    df: pd.DataFrame
+        DataFrame to save
+    xlsx_path: str
+        Path to the XLSX file to create
+    
+    Returns
+    -------
+    None
     """
+    if not xlsx_path.endswith(".xlsx"):
+        raise Exception("File {0} must have a .xlsx extension".format(xlsx_path))
+    if os.path.exists(xlsx_path):
+        #raise Exception("File {0} exists. Please remove it before saving".format(xlsx_path))
+        os.remove(xlsx_path)
+    df.model_id = getattr(df, "model_id", None)
+
     data_sheet_name = "Data"
     legend_sheet_name = "Legend"
     columns = [c for c in df.columns.tolist() if c not in set(["key", "input"])]
     model_ids = []
     for c in columns:
         model_id = c.split(".")[-1]
+        if not is_model_id_valid(model_id):
+            raise Exception("Column {0} does not have a valid model_id suffix".format(c))
         if model_id not in model_ids:
             model_ids += [model_id]
-    colors = get_colors(len(model_ids)) # get colors from model ids
+    colors = get_colors(len(model_ids))
     R = []
     for model_id in model_ids:
         r = [model_id, get_model_slug(model_id), get_model_title(model_id), "https://github.com/ersilia-os/{0}".format(model_id)]
@@ -143,16 +163,28 @@ def write_xlsx(df: pd.DataFrame, file_path: str) -> None:
     columns_colors = []
     for i, model_id in enumerate(model_ids):
         dc_ = get_run_columns(model_id)
+        dc_ = pd.concat([pd.DataFrame([model_id]*dc_.shape[0], columns=["model_id"]), dc_], axis=1)
         columns_colors += [colors[i]]*dc_.shape[0]
         if dc is None:
             dc = dc_
         else:
-            dc = pd.concat([dc, dc_], axis=1).reset_index()
-
+            dc = pd.concat([dc, dc_], axis=0).reset_index(drop=True)
     
-def upload_xlsx(xlsx_file: str) -> None:
-    """
-    Upload XLSX file to Ersilia's Google Drive. There is a dedicated folder to this under
-    Projects/Deliverables. 
-    """
-    pass
+    with pd.ExcelWriter(xlsx_path, engine='xlsxwriter') as writer:
+        # Data sheet
+        df.to_excel(writer, sheet_name=data_sheet_name, index=False, startrow=0, startcol=0)
+        worksheet = writer.sheets[data_sheet_name]
+        worksheet.freeze_panes(1, 0)
+        worksheet.autofilter(0, 0, 0, len(df.columns) - 1)
+        for i, column in enumerate(df.columns):
+            max_length = min(max(df[column].astype(str).map(len).max(), len(str(column))) + 2, 50)
+            worksheet.set_column(i, i, max_length)
+        # Legend sheet
+        dl.to_excel(writer, sheet_name=legend_sheet_name, index=False, startrow=1, startcol=0)
+        dc.to_excel(writer, sheet_name=legend_sheet_name, index=False, startrow=1, startcol=dl.shape[1] + 1)
+        worksheet = writer.sheets[legend_sheet_name]
+        worksheet.merge_range(0, 0, 0, dl.shape[1] - 1, "Ersilia models", writer.book.add_format({'align': 'center', 'bold': True}))
+        worksheet.merge_range(0, dl.shape[1] + 1, 0, dl.shape[1] + dc.shape[1], "Columns", writer.book.add_format({'align': 'center', 'bold': True}))
+        worksheet.freeze_panes(2, 0)
+        worksheet.set_column(0, dl.shape[1] - 1, 30)
+        worksheet.set_column(dl.shape[1], dl.shape[1] + dc.shape[1] - 1, 30)

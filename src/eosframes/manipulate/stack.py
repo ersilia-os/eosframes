@@ -90,26 +90,4 @@ def vstack(df_list: List[pd.DataFrame]) -> pd.DataFrame:
     model_id = list(set(model_ids))[0]
     do.model_id = model_id
     return do
-        
 
-def strip_model_ids_from_columns(df: pd.DataFrame) -> pd.DataFrame:
-    columns = df.columns.tolist()
-    stripped_columns = [c.split(".")[0] for c in columns]
-    if len(stripped_columns) != len(set(stripped_columns)):
-        raise Exception("Columns are not unique")
-    rename = dict((k,v) for k,v in zip(columns, stripped_columns))
-    df = df.rename(columns=rename)
-    return df
-
-
-def add_model_id_to_columns(df: pd.DataFrame) -> pd.DataFrame:
-    model_id = getattr(df, "model_id", None)
-    if model_id is None:
-        raise Exception("DataFrame does not have a model_id attribute")
-    columns = [c for c in df.columns.tolist() if c not in set(["key", "input"])]
-    for c in columns:
-        if "." in c:
-            raise Exception("Column {0} contains a dot (.) character already".format(c))
-    rename = dict((c, c+"."+model_id) for c in columns)
-    df = df.rename(columns=rename)
-    return df

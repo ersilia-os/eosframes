@@ -144,3 +144,30 @@ def get_model_title(model_id: str) -> str:
         return title
     except IndexError:
         raise ValueError(f"No title found in README.md for {model_id}")
+
+
+def get_colors(n: int) -> list:
+    """
+    Generate a palette of n colors using default Google Sheets colors.
+
+    Parameters
+    ----------
+    n: int
+        Number of colors to generate.
+
+    Returns
+    -------
+    list
+        List of hex color codes.
+    """
+    google_sheets_colors = [
+        "#3366CC", "#DC3912", "#FF9900", "#109618", "#990099",
+        "#3B3EAC", "#0099C6", "#DD4477", "#66AA00", "#B82E2E",
+        "#316395", "#994499", "#22AA99", "#AAAA11", "#6633CC",
+        "#E67300", "#8B0707", "#329262", "#5574A6", "#3B3EAC"
+    ]
+    if n <= len(google_sheets_colors):
+        return google_sheets_colors[:n]
+    else:
+        # Repeat colors if n exceeds the default palette size
+        return (google_sheets_colors * (n // len(google_sheets_colors) + 1))[:n]
