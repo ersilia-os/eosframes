@@ -3,6 +3,7 @@ import h5py
 import pandas as pd
 
 from ..utils.utils import get_model_id_from_path
+from ..logger import get_logger
 
 
 def read_csv(file_path: str) -> pd.DataFrame:
@@ -20,17 +21,20 @@ def read_csv(file_path: str) -> pd.DataFrame:
     df: pd.DataFrame
         DataFrame containing the data from the CSV file
     """
+    logger = get_logger()
     if not os.path.exists(file_path):
         raise Exception("File {0} does not exist".format(file_path))
     model_id = get_model_id_from_path(file_path)
     if model_id is None:
         raise Exception("Could not extract model_id from file name {0}".format(file_path))
+    logger.info("Reading CSV: %s", file_path)
     df = pd.read_csv(file_path)
     if "key" not in df.columns:
         raise Exception("File {0} does not contain a column named 'key'".format(file_path))
     if "input" not in df.columns:
         raise Exception("File {0} does not contain a column named 'input'".format(file_path))
     df.model_id = model_id
+    logger.info("Loaded %d rows (model_id=%s)", len(df), model_id)
     return df
 
 
@@ -49,11 +53,13 @@ def read_h5(h5_path: str) -> pd.DataFrame:
     df: pd.DataFrame
         DataFrame containing the data from the HDF5 file
     """
+    logger = get_logger()
     if not os.path.exists(h5_path):
         raise Exception("File {0} does not exist".format(h5_path))
     model_id = get_model_id_from_path(h5_path)
     if model_id is None:
         raise Exception("Could not extract model_id from file name {0}".format(h5_path))
+    logger.info("Reading H5: %s", h5_path)
     with h5py.File(h5_path, "r") as f:
         if "values" not in f.keys():
             raise Exception("File {0} does not contain a dataset named 'values'".format(h5_path))
@@ -71,6 +77,7 @@ def read_h5(h5_path: str) -> pd.DataFrame:
     df_ = pd.DataFrame(values, columns=columns)
     df = pd.concat([df, df_], axis=1)
     df.model_id = model_id
+    logger.info("Loaded %d rows (model_id=%s)", len(df), model_id)
     return df
 
 
@@ -89,11 +96,13 @@ def read_chunked_csvs(dir_path: str) -> pd.DataFrame:
     df: pd.DataFrame
         DataFrame containing the concatenated data from the CSV files
     """
+    logger = get_logger()
     if not os.path.exists(dir_path):
         raise Exception("Directory {0} does not exist".format(dir_path))
     model_id = get_model_id_from_path(dir_path)
     if model_id is None:
         raise Exception("Could not extract model_id from directory name {0}".format(dir_path))
+    logger.info("Reading chunked CSVs from: %s", dir_path)
     batch_ids = []
     zfill = 0
     prefixes = []
@@ -117,4 +126,5 @@ def read_chunked_csvs(dir_path: str) -> pd.DataFrame:
             continue
         df = pd.concat([df, pd.read_csv(os.path.join(dir_path, fn))], axis=0).reset_index(drop=True)
     df.model_id = model_id
+    logger.info("Loaded %d rows from %d chunks (model_id=%s)", len(df), len(batch_ids), model_id)
     return df

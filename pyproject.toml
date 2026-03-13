@@ -1,14 +1,21 @@
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
+
 [tool.poetry]
 name = "eosframes"
 version = "0.1.0"
 description = "Ersilia utilities for working with tabular output data"
 authors = ["Ersilia Open Source Initiative <hello@ersilia.io>"]
+packages = [{include = "eosframes", from = "src"}]
 
 [tool.poetry.dependencies]
 python = ">=3.8"
 pandas = ">=2.0.0"
 h5py = ">=3.10.0"
 requests = ">=2.31"
+click = ">=8.0"
+rich = ">=10.0"
 
-[tool.poetry.packages]
-include = "eosframes"
+[tool.poetry.scripts]
+eosframes = "eosframes.cli:main"

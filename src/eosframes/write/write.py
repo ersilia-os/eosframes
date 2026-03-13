@@ -3,6 +3,7 @@ import h5py
 import pandas as pd
 
 from ..utils.utils import chunker, get_model_id_from_path, is_model_id_valid, get_colors, get_model_slug, get_model_title, get_run_columns
+from ..logger import get_logger
 
 
 def write_csv(df: pd.DataFrame, csv_path: str) -> None:
@@ -20,20 +21,23 @@ def write_csv(df: pd.DataFrame, csv_path: str) -> None:
     -------
     None
     """
+    logger = get_logger()
     if os.path.exists(csv_path):
         raise Exception("File {0} exists. Please remove it before saving".format(csv_path))
     if not csv_path.endswith(".csv"):
         raise Exception("File {0} must have a .csv extension".format(csv_path))
     model_id_0 = get_model_id_from_path(csv_path)
     if model_id_0 is None:
-        raise Exception("Could not extract model_id from file name {0}! The file name must contain the model identifier".format(file_path))
+        raise Exception("Could not extract model_id from file name {0}! The file name must contain the model identifier".format(csv_path))
     model_id_1 = getattr(df, "model_id", None)
     if model_id_1 is None:
         raise Exception("DataFrame does not have a model_id attribute")
     if model_id_0 != model_id_1:
         raise Exception("Model_id from file name ({0}) does not match model_id from DataFrame ({1})".format(model_id_0, model_id_1))
     df = df.reset_index(drop=True)
+    logger.info("Writing CSV: %s (%d rows)", csv_path, len(df))
     df.to_csv(csv_path, index=False)
+    logger.info("Done writing %s", csv_path)
 
 
 def write_h5(df: pd.DataFrame, h5_path: str, dtype: any) -> None:
@@ -53,6 +57,7 @@ def write_h5(df: pd.DataFrame, h5_path: str, dtype: any) -> None:
     Returns
     None
     """
+    logger = get_logger()
     if os.path.exists(h5_path):
         raise Exception("File {0} exists. Please remove it before saving".format(h5_path))
     model_id_0 = get_model_id_from_path(h5_path)
@@ -64,6 +69,7 @@ def write_h5(df: pd.DataFrame, h5_path: str, dtype: any) -> None:
     if model_id_0 != model_id_1:
         raise Exception("Model_id from file name ({0}) does not match model_id from DataFrame ({1})".format(model_id_0, model_id_1))
     df = df.reset_index(drop=True)
+    logger.info("Writing H5: %s (%d rows)", h5_path, len(df))
     with h5py.File(h5_path, "w") as f:
         if "key" in df.columns:
             keys = df["key"].astype(str).tolist()
@@ -77,6 +83,7 @@ def write_h5(df: pd.DataFrame, h5_path: str, dtype: any) -> None:
         f.create_dataset("features", data=feature_columns, dtype=dt)
         values = df[feature_columns].values
         f.create_dataset("values", data=values, dtype=dtype)
+    logger.info("Done writing %s", h5_path)
 
 
 def write_chunked_csvs(df: pd.DataFrame, dir_path: str, chunksize: int) -> None:
@@ -97,6 +104,7 @@ def write_chunked_csvs(df: pd.DataFrame, dir_path: str, chunksize: int) -> None:
     -------
     None
     """
+    logger = get_logger()
     if chunksize > 100000:
         raise Exception("Chunksize at Ersilia is currently limited to 100000")
     model_id_0 = get_model_id_from_path(dir_path)
@@ -115,9 +123,11 @@ def write_chunked_csvs(df: pd.DataFrame, dir_path: str, chunksize: int) -> None:
     num_chunks = df.shape[0] / chunksize + 1
     if num_chunks > 999999:
         raise Exception("Too many chunks ({0}). Maximum number of chunks is 999999. Increase the chunksize if you want to process your full daataset".format(num_chunks))
+    logger.info("Writing %d rows to %s in chunks of %d", len(df), dir_path, chunksize)
     for i, chunk in enumerate(chunker(df, chunksize)):
         file_name = "chunk_{0}.csv".format(str(i).zfill(6))
         chunk.to_csv(os.path.join(dir_path, file_name), index=False)
+    logger.info("Done writing chunks to %s", dir_path)
 
 
 def write_xlsx(df: pd.DataFrame, xlsx_path: str) -> None:
