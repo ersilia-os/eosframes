@@ -4,8 +4,8 @@ from typing import Optional, Dict
 
 from .utils.utils import is_model_id_valid
 
-# Matches the full stem: eos<digit><3 alphanumeric>_v<digits>
-_STEM_RE = re.compile(r'^(eos\d[A-Za-z0-9]{3})_(v\d+)$')
+# Matches eos<digit><3 alphanumeric>_v<digits> anywhere in the stem (allows leading prefix)
+_STEM_RE = re.compile(r'(?:^|_)(eos\d[A-Za-z0-9]{3})_(v\d+)$')
 
 VALID_EXTENSIONS = {"csv", "h5"}
 
@@ -35,7 +35,7 @@ def parse_name(filename: str) -> Optional[Dict]:
     # Check for chunks directory
     if basename.endswith("_chunks"):
         stem = basename[: -len("_chunks")]
-        m = _STEM_RE.match(stem)
+        m = _STEM_RE.search(stem)
         if m and is_model_id_valid(m.group(1)):
             return {
                 "model_id": m.group(1),
@@ -51,7 +51,7 @@ def parse_name(filename: str) -> Optional[Dict]:
     stem, ext = basename.rsplit(".", 1)
     if ext not in VALID_EXTENSIONS:
         return None
-    m = _STEM_RE.match(stem)
+    m = _STEM_RE.search(stem)
     if m and is_model_id_valid(m.group(1)):
         return {
             "model_id": m.group(1),

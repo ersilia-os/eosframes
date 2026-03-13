@@ -70,6 +70,15 @@ class TestNaming:
         r = parse_name("/some/dir/eos4e40_v1.csv")
         assert r["model_id"] == "eos4e40"
 
+    def test_parse_with_prefix(self):
+        r = parse_name("260313_gardp_eos4e40_v1.csv")
+        assert r == {"model_id": "eos4e40", "version": "v1", "extension": "csv", "name_type": "csv"}
+
+    def test_parse_with_prefix_chunks(self):
+        r = parse_name("260313_gardp_eos4e40_v1_chunks")
+        assert r["model_id"] == "eos4e40"
+        assert r["name_type"] == "chunks_dir"
+
     def test_parse_no_version(self):
         assert parse_name("eos4e40.csv") is None
 
