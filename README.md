@@ -257,24 +257,32 @@ eosframes columns eos4e40 v1 -o eos4e40_columns.csv
 
 ---
 
-### `eosframes fit`
+### `eosframes transform`
 
-Fit a standard scaler on an Ersilia output file and save the parameters to JSON.
-
-```bash
-eosframes fit INPUT_FILE TRANSFORMER_JSON [--method standard] [--output OUTPUT]
-```
+Scale the numeric feature columns of an Ersilia output file. Three modes depending on `--params` and `--fit`:
 
 ```bash
-# Fit a scaler on the eos7m30 ADMET outputs (49 features)
-eosframes fit example_eos7m30_v1.csv eos7m30_v1_scaler.json
-
-# Also writes the scaled output to eos7m30_v1_scaled.csv by default
-# Use -o to specify a custom output path
-eosframes fit example_eos7m30_v1.csv eos7m30_v1_scaler.json -o eos7m30_v1_scaled.csv
+eosframes transform INPUT_FILE [-o OUTPUT] [--params JSON] [--fit] [--method standard]
 ```
 
-The JSON file contains:
+| Flags                  | Behaviour                                              |
+|------------------------|--------------------------------------------------------|
+| *(none)*               | Fit on `INPUT_FILE`, discard parameters                |
+| `--params FILE --fit`  | Fit on `INPUT_FILE`, save parameters to `FILE`         |
+| `--params FILE`        | Load parameters from `FILE`, apply (forward pass)      |
+
+```bash
+# Fit a scaler on the eos7m30 ADMET outputs (49 features), discard params
+eosframes transform example_eos7m30_v1.csv
+
+# Fit and save parameters for later reuse
+eosframes transform example_eos7m30_v1.csv --params eos7m30_v1_scaler.json --fit
+
+# Apply saved parameters to new compounds (forward pass)
+eosframes transform new_eos7m30_v1.csv --params eos7m30_v1_scaler.json -o new_eos7m30_v1_scaled.csv
+```
+
+The saved JSON file contains:
 
 ```json
 {
@@ -293,24 +301,7 @@ The JSON file contains:
 }
 ```
 
-Columns with more than 25% missing values are skipped and listed in `skipped_columns`.
-
----
-
-### `eosframes apply`
-
-Apply a saved scaler transformer to a new file.
-
-```bash
-eosframes apply INPUT_FILE TRANSFORMER_JSON OUTPUT_FILE
-```
-
-```bash
-# Apply the fitted scaler to new compounds from the same model
-eosframes apply new_eos7m30_v1.csv eos7m30_v1_scaler.json new_eos7m30_v1_scaled.csv
-```
-
-The model ID and version in the transformer JSON must match the input filename. The output file can be any `.csv` or `.h5` path.
+Columns with more than 25% missing values are skipped and listed in `skipped_columns`. The output defaults to `<input_stem>_scaled.<ext>` when `-o` is not provided.
 
 ---
 
@@ -379,7 +370,7 @@ before, after = dedupe_file("eos4e40_v1_raw.csv", "eos4e40_v1.csv")
 ### Scaling
 
 ```python
-from eosframes import fit_scaler, apply_scaler, fit_scaler_file, apply_scaler_file
+from eosframes import fit_scaler, apply_scaler, transform_file
 import pandas as pd
 
 # DataFrame API
@@ -388,8 +379,8 @@ params = fit_scaler(df)           # dict with method, columns, parameters
 scaled = apply_scaler(df, params)
 
 # File API (with model_id/version cross-validation)
-fit_scaler_file("example_eos7m30_v1.csv", "eos7m30_v1_scaler.json")
-apply_scaler_file("new_eos7m30_v1.csv", "eos7m30_v1_scaler.json", "new_eos7m30_v1_scaled.csv")
+transform_file("example_eos7m30_v1.csv", params="eos7m30_v1_scaler.json", fit=True)
+transform_file("new_eos7m30_v1.csv", params="eos7m30_v1_scaler.json", output_path="new_eos7m30_v1_scaled.csv")
 ```
 
 ### Hub data
@@ -452,11 +443,11 @@ eosframes dedupe eos7m30_v1.csv eos7m30_v1_clean.csv
 # 5. Inspect
 eosframes summary eos7m30_v1_clean.csv
 
-# 6. Fit a scaler on the training set
-eosframes fit eos7m30_v1_clean.csv eos7m30_v1_scaler.json
+# 6. Fit a scaler on the training set and save parameters
+eosframes transform eos7m30_v1_clean.csv --params eos7m30_v1_scaler.json --fit
 
-# 7. Apply scaler to new data
-eosframes apply new_eos7m30_v1.csv eos7m30_v1_scaler.json new_eos7m30_v1_scaled.csv
+# 7. Apply scaler to new data (forward pass)
+eosframes transform new_eos7m30_v1.csv --params eos7m30_v1_scaler.json -o new_eos7m30_v1_scaled.csv
 
 # 8. Stack both model outputs side by side
 eosframes stack eos4e40_v1_clean.csv eos7m30_v1_clean.csv --output combined.csv
