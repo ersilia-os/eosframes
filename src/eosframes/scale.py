@@ -160,26 +160,38 @@ def _write_df(df: pd.DataFrame, output_path: str) -> None:
         )
 
 
-def fit_scaler_file(
+def transform_file(
     input_path: str,
-    transformer_path: str,
-    method: str = "standard",
     output_path: Optional[str] = None,
+    params: Optional[str] = None,
+    fit: bool = False,
+    method: str = "standard",
 ) -> str:
-    """Fit a scaler on an Ersilia output file and save the parameters to JSON.
+    """Transform an Ersilia output file by scaling its numeric feature columns.
+
+    ``params`` and ``fit`` together control the mode:
+
+    - ``params=None, fit=False`` — fit on ``input_path``, discard parameters.
+    - ``params=path, fit=True``  — fit on ``input_path``, save parameters to
+      ``path`` (must not already exist).
+    - ``params=path, fit=False`` — load parameters from ``path`` and apply
+      them directly (forward pass, no refitting).
 
     Parameters
     ----------
     input_path : str
-        Input CSV or H5 file. Must follow the Ersilia naming convention so
-        that ``model_id`` and ``version`` can be extracted.
-    transformer_path : str
-        Path where the transformer JSON will be written. Must not exist.
-    method : str
-        Scaling method (default ``"standard"``).
+        Input CSV or H5 file. Must follow the Ersilia naming convention.
     output_path : str, optional
         Where to write the scaled data. Defaults to
         ``<input_stem>_scaled.<ext>``.
+    params : str, optional
+        Path to a JSON file. Used to save fitted parameters (when ``fit=True``)
+        or to load existing parameters (when ``fit=False``).
+    fit : bool
+        When ``True``, fit a new scaler and save parameters to ``params``.
+        Requires ``params`` to be set. Ignored when ``params`` is ``None``.
+    method : str
+        Scaling method (default ``"standard"``). Ignored in forward-pass mode.
 
     Returns
     -------
@@ -189,8 +201,8 @@ def fit_scaler_file(
     Raises
     ------
     EosframesError
-        On naming convention violations, pre-existing paths, or no numeric
-        columns.
+        On naming convention violations, pre-existing paths, model_id/version
+        mismatch, column mismatch, or no numeric columns.
     """
     logger = get_logger()
 
@@ -199,14 +211,8 @@ def fit_scaler_file(
             f"'{input_path}' does not follow the naming convention. "
             "Expected: <model_id>_<version>.<ext>"
         )
-    if os.path.exists(transformer_path):
-        raise EosframesError(
-            f"Transformer file '{transformer_path}' already exists. Remove it first."
-        )
 
     parsed = parse_name(input_path)
-    model_id = parsed["model_id"]
-    version = parsed["version"]
     in_ext = parsed["extension"]
 
     if output_path is None:
@@ -221,96 +227,58 @@ def fit_scaler_file(
     from .ops import _read_file
     df = _read_file(input_path)
 
-    logger.info("Fitting %s scaler on %d rows from %s", method, len(df), input_path)
-    params = fit_scaler(df, method=method)
+    if params is not None and not fit:
+        # Forward pass: load and apply existing parameters.
+        if not os.path.exists(params):
+            raise EosframesError(f"Params file '{params}' not found.")
+        with open(params) as fh:
+            transformer = json.load(fh)
 
-    transformer = {
-        "model_id": model_id,
-        "version": version,
-        "n_rows": len(df),
-        "fitted_at": datetime.now().isoformat(timespec="seconds"),
-        **params,
-    }
+        t_model_id = transformer.get("model_id")
+        t_version = transformer.get("version")
+        f_model_id = parsed["model_id"]
+        f_version = parsed["version"]
 
-    with open(transformer_path, "w") as fh:
-        json.dump(transformer, fh, indent=2)
-    logger.info("Transformer saved to %s", transformer_path)
+        if f_model_id != t_model_id:
+            raise EosframesError(
+                f"Model ID mismatch: file has '{f_model_id}' but transformer "
+                f"was fitted on '{t_model_id}'."
+            )
+        if f_version != t_version:
+            raise EosframesError(
+                f"Version mismatch: file has '{f_version}' but transformer "
+                f"was fitted on '{t_version}'."
+            )
 
-    scaled_df = apply_scaler(df, params)
-    _write_df(scaled_df, output_path)
-    logger.info(
-        "Scaled output written to %s (%d column(s) transformed, %d skipped)",
-        output_path,
-        len(params["columns"]),
-        len(params["skipped_columns"]),
-    )
-    return output_path
+        logger.info("Applying transformer to %d rows from %s", len(df), input_path)
+        scaled_df = apply_scaler(df, transformer)
+    else:
+        # Fit mode: compute parameters, optionally save them.
+        if params is not None and os.path.exists(params):
+            raise EosframesError(
+                f"Params file '{params}' already exists. Remove it first."
+            )
 
+        model_id = parsed["model_id"]
+        version = parsed["version"]
 
-def apply_scaler_file(
-    input_path: str,
-    transformer_path: str,
-    output_path: str,
-) -> None:
-    """Apply a saved transformer to a new file.
+        logger.info("Fitting %s scaler on %d rows from %s", method, len(df), input_path)
+        fitted = fit_scaler(df, method=method)
 
-    Validates that the ``model_id`` and ``version`` in the transformer JSON
-    match the naming convention of ``input_path``, and that the feature
-    columns match exactly.
+        if params is not None:
+            transformer = {
+                "model_id": model_id,
+                "version": version,
+                "n_rows": len(df),
+                "fitted_at": datetime.now().isoformat(timespec="seconds"),
+                **fitted,
+            }
+            with open(params, "w") as fh:
+                json.dump(transformer, fh, indent=2)
+            logger.info("Params saved to %s", params)
 
-    Parameters
-    ----------
-    input_path : str
-        Input CSV or H5 file. Must follow the Ersilia naming convention.
-    transformer_path : str
-        Path to the transformer JSON produced by :func:`fit_scaler_file`.
-    output_path : str
-        Output file path. Any ``.csv`` or ``.h5`` path is accepted.
+        scaled_df = apply_scaler(df, fitted)
 
-    Raises
-    ------
-    EosframesError
-        On model_id/version mismatch, column mismatch, or missing files.
-    """
-    logger = get_logger()
-
-    if not os.path.exists(transformer_path):
-        raise EosframesError(f"Transformer file '{transformer_path}' not found.")
-    if os.path.exists(output_path):
-        raise EosframesError(
-            f"Output file '{output_path}' already exists. Remove it first."
-        )
-
-    with open(transformer_path) as fh:
-        transformer = json.load(fh)
-
-    t_model_id = transformer.get("model_id")
-    t_version = transformer.get("version")
-
-    if not is_valid_name(input_path):
-        raise EosframesError(
-            f"'{input_path}' does not follow the naming convention. "
-            "Expected: <model_id>_<version>.<ext>"
-        )
-    parsed = parse_name(input_path)
-    f_model_id = parsed["model_id"]
-    f_version = parsed["version"]
-
-    if f_model_id != t_model_id:
-        raise EosframesError(
-            f"Model ID mismatch: file has '{f_model_id}' but transformer "
-            f"was fitted on '{t_model_id}'."
-        )
-    if f_version != t_version:
-        raise EosframesError(
-            f"Version mismatch: file has '{f_version}' but transformer "
-            f"was fitted on '{t_version}'."
-        )
-
-    from .ops import _read_file
-    df = _read_file(input_path)
-
-    logger.info("Applying transformer to %d rows from %s", len(df), input_path)
-    scaled_df = apply_scaler(df, transformer)
     _write_df(scaled_df, output_path)
     logger.info("Scaled output written to %s", output_path)
+    return output_path

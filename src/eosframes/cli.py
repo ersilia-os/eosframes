@@ -339,59 +339,61 @@ def columns(model_id: str, version: str, output: str) -> None:
 
 @main.command()
 @click.argument("input_file", type=click.Path(exists=True, dir_okay=False))
-@click.argument("transformer_json", type=click.Path())
-@click.option(
-    "--method",
-    default="standard",
-    show_default=True,
-    type=click.Choice(_scale.SUPPORTED_METHODS),
-    help="Scaling method.",
-)
 @click.option(
     "--output", "-o",
     default=None,
     type=click.Path(),
     help="Output file path. Defaults to <input_stem>_scaled.<ext>.",
 )
-def fit(input_file: str, transformer_json: str, method: str, output: str) -> None:
-    """Fit a scaler on INPUT_FILE and save parameters to TRANSFORMER_JSON.
+@click.option(
+    "--params",
+    default=None,
+    type=click.Path(),
+    help="JSON file for transform parameters. With --fit: save fitted params here. Without --fit: load params from here (forward pass).",
+)
+@click.option(
+    "--fit",
+    is_flag=True,
+    default=False,
+    help="Fit a new scaler and save parameters to --params. Requires --params.",
+)
+@click.option(
+    "--method",
+    default="standard",
+    show_default=True,
+    type=click.Choice(_scale.SUPPORTED_METHODS),
+    help="Scaling method. Ignored in forward-pass mode.",
+)
+def transform(input_file: str, output: str, params: str, fit: bool, method: str) -> None:
+    """Scale the numeric feature columns of INPUT_FILE.
 
-    INPUT_FILE must follow the Ersilia naming convention so that model_id
-    and version can be recorded in the transformer. The scaled data is
-    written alongside the transformer by default.
-
-    Only numeric feature columns are scaled. Columns with more than 25 %
-    missing values are skipped and listed in the JSON as skipped_columns.
+    Three modes depending on --params and --fit:
 
     \b
-    Example:
-      eosframes fit eos4e40_v1.csv eos4e40_v1_scaler.json
-      eosframes fit eos4e40_v1.csv eos4e40_v1_scaler.json -o scaled.csv
+      No --params          fit on INPUT_FILE, discard parameters.
+      --params FILE --fit  fit on INPUT_FILE, save parameters to FILE.
+      --params FILE        load parameters from FILE, apply (forward pass).
+
+    Only numeric feature columns are scaled. Columns with more than 25 %
+    missing values are skipped. The key and input columns pass through
+    unchanged.
+
+    \b
+    Examples:
+      eosframes transform eos4e40_v1.csv
+      eosframes transform eos4e40_v1.csv --params scaler.json --fit
+      eosframes transform new_eos4e40_v1.csv --params scaler.json -o scaled.csv
     """
+    if fit and params is None:
+        raise click.UsageError("--fit requires --params to specify where to save the parameters.")
     try:
-        out = _scale.fit_scaler_file(input_file, transformer_json, method=method, output_path=output)
+        out = _scale.transform_file(
+            input_file,
+            output_path=output,
+            params=params,
+            fit=fit,
+            method=method,
+        )
     except EosframesError as e:
         raise _err(e) from e
     click.echo(out)
-
-
-@main.command()
-@click.argument("input_file", type=click.Path(exists=True, dir_okay=False))
-@click.argument("transformer_json", type=click.Path(exists=True, dir_okay=False))
-@click.argument("output_file", type=click.Path())
-def apply(input_file: str, transformer_json: str, output_file: str) -> None:
-    """Apply a saved transformer to INPUT_FILE and write to OUTPUT_FILE.
-
-    The model_id and version recorded in TRANSFORMER_JSON must match those
-    in INPUT_FILE's name. The feature columns must also match exactly.
-
-    OUTPUT_FILE may be any .csv or .h5 path — no naming convention required.
-
-    \b
-    Example:
-      eosframes apply new_eos4e40_v1.csv eos4e40_v1_scaler.json scaled_new.csv
-    """
-    try:
-        _scale.apply_scaler_file(input_file, transformer_json, output_file)
-    except EosframesError as e:
-        raise _err(e) from e
