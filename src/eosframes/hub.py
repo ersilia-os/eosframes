@@ -51,11 +51,11 @@ def fetch_metadata(model_id: str) -> dict:
             try:
                 import yaml
                 return yaml.safe_load(resp.text)
-            except ImportError:
+            except ImportError as exc:
                 raise EosframesError(
                     f"Model '{model_id}' has a YAML metadata file but 'pyyaml' is not "
                     "installed. Install it with: pip install pyyaml"
-                )
+                ) from exc
     raise EosframesError(
         f"Could not fetch metadata for model '{model_id}'. "
         f"Make sure the repo exists at https://github.com/ersilia-os/{model_id}"

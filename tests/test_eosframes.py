@@ -2,8 +2,8 @@
 Exhaustive tests for eosframes.
 
 Uses static reference data in data/ for realistic end-to-end coverage:
-  data/eos4e40_v1.csv  — 50 rows, 1 feature column (inhibition_50um)
-  data/eos7m30_v1.csv  — 50 rows, 49 ADMET feature columns
+  data/example_eos4e40_v1.csv  — 100 rows, 1 feature column (inhibition_50um)
+  data/example_eos7m30_v1.csv  — 100 rows, 49 ADMET feature columns
 
 Run with:
     pytest tests/test_eosframes.py -v
@@ -52,12 +52,12 @@ from eosframes.naming import get_version_from_path
 # ---------------------------------------------------------------------------
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
-EOS4E40_CSV = os.path.join(DATA_DIR, "eos4e40_v1.csv")
-EOS7M30_CSV = os.path.join(DATA_DIR, "eos7m30_v1.csv")
+EOS4E40_CSV = os.path.join(DATA_DIR, "example_eos4e40_v1.csv")
+EOS7M30_CSV = os.path.join(DATA_DIR, "example_eos7m30_v1.csv")
 
-EOS4E40_ROWS = 50
+EOS4E40_ROWS = 100
 EOS4E40_FEATURES = ["inhibition_50um"]
-EOS7M30_ROWS = 50
+EOS7M30_ROWS = 100
 EOS7M30_N_FEATURES = 49
 
 
@@ -249,9 +249,9 @@ class TestSplit:
     def test_split_eos4e40(self, tmp):
         out = str(tmp / "chunks")
         n = split_csv(EOS4E40_CSV, out, chunksize=10)
-        assert n == 5  # 50 rows / 10
+        assert n == 10  # 100 rows / 10
         files = sorted(os.listdir(out))
-        assert len(files) == 5
+        assert len(files) == 10
         assert files[0] == "chunk_000.csv"
 
     def test_split_preserves_header(self, tmp):
@@ -292,7 +292,7 @@ class TestSplit:
         out = str(tmp / "chunks")
         result = _runner().invoke(main, ["split", EOS4E40_CSV, out, "--chunksize", "10"])
         assert result.exit_code == 0, result.output
-        assert len(os.listdir(out)) == 5
+        assert len(os.listdir(out)) == 10
 
 
 # ===========================================================================

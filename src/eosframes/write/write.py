@@ -1,39 +1,48 @@
 import os
+
 import h5py
 import pandas as pd
 
-from ..utils.utils import chunker, get_model_id_from_path, is_model_id_valid, get_colors, get_model_slug, get_model_title, get_run_columns
 from ..logger import get_logger
+from ..utils.utils import (
+    chunker,
+    get_colors,
+    get_model_id_from_path,
+    get_model_slug,
+    get_model_title,
+    get_run_columns,
+    is_model_id_valid,
+)
 
 
 def write_csv(df: pd.DataFrame, csv_path: str) -> None:
     """
     Save DataFrame as CSV file in Ersilia
-    
+
     Parameters
     ----------
     df: pd.DataFrame
         DataFrame to save
     file_path: str
         Path to the CSV file to create
-    
+
     Returns
     -------
     None
     """
     logger = get_logger()
     if os.path.exists(csv_path):
-        raise Exception("File {0} exists. Please remove it before saving".format(csv_path))
+        raise Exception(f"File {csv_path} exists. Please remove it before saving")
     if not csv_path.endswith(".csv"):
-        raise Exception("File {0} must have a .csv extension".format(csv_path))
+        raise Exception(f"File {csv_path} must have a .csv extension")
     model_id_0 = get_model_id_from_path(csv_path)
     if model_id_0 is None:
-        raise Exception("Could not extract model_id from file name {0}! The file name must contain the model identifier".format(csv_path))
+        raise Exception(f"Could not extract model_id from file name {csv_path}! The file name must contain the model identifier")
     model_id_1 = getattr(df, "model_id", None)
     if model_id_1 is None:
         raise Exception("DataFrame does not have a model_id attribute")
     if model_id_0 != model_id_1:
-        raise Exception("Model_id from file name ({0}) does not match model_id from DataFrame ({1})".format(model_id_0, model_id_1))
+        raise Exception(f"Model_id from file name ({model_id_0}) does not match model_id from DataFrame ({model_id_1})")
     df = df.reset_index(drop=True)
     logger.info("Writing CSV: %s (%d rows)", csv_path, len(df))
     df.to_csv(csv_path, index=False)
@@ -43,7 +52,7 @@ def write_csv(df: pd.DataFrame, csv_path: str) -> None:
 def write_h5(df: pd.DataFrame, h5_path: str, dtype: any) -> None:
     """
     Save DataFrame as HDF5 file in Ersilia
-    
+
     ---
     Parameters
     df: pd.DataFrame
@@ -59,15 +68,15 @@ def write_h5(df: pd.DataFrame, h5_path: str, dtype: any) -> None:
     """
     logger = get_logger()
     if os.path.exists(h5_path):
-        raise Exception("File {0} exists. Please remove it before saving".format(h5_path))
+        raise Exception(f"File {h5_path} exists. Please remove it before saving")
     model_id_0 = get_model_id_from_path(h5_path)
     if model_id_0 is None:
-        raise Exception("Could not extract model_id from file name {0}! The file name must contain the model identifier".format(h5_path))
+        raise Exception(f"Could not extract model_id from file name {h5_path}! The file name must contain the model identifier")
     model_id_1 = getattr(df, "model_id", None)
     if model_id_1 is None:
         raise Exception("DataFrame does not have a model_id attribute")
     if model_id_0 != model_id_1:
-        raise Exception("Model_id from file name ({0}) does not match model_id from DataFrame ({1})".format(model_id_0, model_id_1))
+        raise Exception(f"Model_id from file name ({model_id_0}) does not match model_id from DataFrame ({model_id_1})")
     df = df.reset_index(drop=True)
     logger.info("Writing H5: %s (%d rows)", h5_path, len(df))
     with h5py.File(h5_path, "w") as f:
@@ -90,7 +99,7 @@ def write_chunked_csvs(df: pd.DataFrame, dir_path: str, chunksize: int) -> None:
     """
     This function splits a dataframe into multiple CSV files, each containing a chunk of the original dataframe.
     The CSV files are saved in a specified directory, with filenames indicating their chunk number.
-    
+
     Parameters
     ----------
     df: pd.DataFrame
@@ -99,7 +108,7 @@ def write_chunked_csvs(df: pd.DataFrame, dir_path: str, chunksize: int) -> None:
         The directory path where the chunked CSV files will be saved.
     chunksize: int
         The number of rows per chunk.
-    
+
     Returns
     -------
     None
@@ -109,23 +118,23 @@ def write_chunked_csvs(df: pd.DataFrame, dir_path: str, chunksize: int) -> None:
         raise Exception("Chunksize at Ersilia is currently limited to 100000")
     model_id_0 = get_model_id_from_path(dir_path)
     if model_id_0 is None:
-        raise Exception("Could not extract model_id from directory {0}! The directory must contain the model identifier".format(dir_path))
+        raise Exception(f"Could not extract model_id from directory {dir_path}! The directory must contain the model identifier")
     model_id_1 = getattr(df, "model_id", None)
     if model_id_1 is None:
         raise Exception("DataFrame does not have a model_id attribute")
     if model_id_0 != model_id_1:
-        raise Exception("Model_id from file name ({0}) does not match model_id from DataFrame ({1})".format(model_id_0, model_id_1))
+        raise Exception(f"Model_id from file name ({model_id_0}) does not match model_id from DataFrame ({model_id_1})")
     df = df.reset_index(drop=True)
     dir_path = os.path.abspath(dir_path)
     if os.path.exists(dir_path):
-        raise Exception("Folder {0} exists. Please remove the folder before saving files in there".format(dir_path))
+        raise Exception(f"Folder {dir_path} exists. Please remove the folder before saving files in there")
     os.mkdir(dir_path)
     num_chunks = df.shape[0] / chunksize + 1
     if num_chunks > 999999:
-        raise Exception("Too many chunks ({0}). Maximum number of chunks is 999999. Increase the chunksize if you want to process your full daataset".format(num_chunks))
+        raise Exception(f"Too many chunks ({num_chunks}). Maximum number of chunks is 999999. Increase the chunksize if you want to process your full daataset")
     logger.info("Writing %d rows to %s in chunks of %d", len(df), dir_path, chunksize)
     for i, chunk in enumerate(chunker(df, chunksize)):
-        file_name = "chunk_{0}.csv".format(str(i).zfill(6))
+        file_name = f"chunk_{str(i).zfill(6)}.csv"
         chunk.to_csv(os.path.join(dir_path, file_name), index=False)
     logger.info("Done writing chunks to %s", dir_path)
 
@@ -140,13 +149,13 @@ def write_xlsx(df: pd.DataFrame, xlsx_path: str) -> None:
         DataFrame to save
     xlsx_path: str
         Path to the XLSX file to create
-    
+
     Returns
     -------
     None
     """
     if not xlsx_path.endswith(".xlsx"):
-        raise Exception("File {0} must have a .xlsx extension".format(xlsx_path))
+        raise Exception(f"File {xlsx_path} must have a .xlsx extension")
     if os.path.exists(xlsx_path):
         #raise Exception("File {0} exists. Please remove it before saving".format(xlsx_path))
         os.remove(xlsx_path)
@@ -159,13 +168,13 @@ def write_xlsx(df: pd.DataFrame, xlsx_path: str) -> None:
     for c in columns:
         model_id = c.split(".")[-1]
         if not is_model_id_valid(model_id):
-            raise Exception("Column {0} does not have a valid model_id suffix".format(c))
+            raise Exception(f"Column {c} does not have a valid model_id suffix")
         if model_id not in model_ids:
             model_ids += [model_id]
     colors = get_colors(len(model_ids))
     R = []
     for model_id in model_ids:
-        r = [model_id, get_model_slug(model_id), get_model_title(model_id), "https://github.com/ersilia-os/{0}".format(model_id)]
+        r = [model_id, get_model_slug(model_id), get_model_title(model_id), f"https://github.com/ersilia-os/{model_id}"]
         R += [r]
     dl = pd.DataFrame(R, columns=["model_id", "slug", "title", "link"])
 
@@ -175,11 +184,8 @@ def write_xlsx(df: pd.DataFrame, xlsx_path: str) -> None:
         dc_ = get_run_columns(model_id)
         dc_ = pd.concat([pd.DataFrame([model_id]*dc_.shape[0], columns=["model_id"]), dc_], axis=1)
         columns_colors += [colors[i]]*dc_.shape[0]
-        if dc is None:
-            dc = dc_
-        else:
-            dc = pd.concat([dc, dc_], axis=0).reset_index(drop=True)
-    
+        dc = dc_ if dc is None else pd.concat([dc, dc_], axis=0).reset_index(drop=True)
+
     with pd.ExcelWriter(xlsx_path, engine='xlsxwriter') as writer:
         # Data sheet
         df.to_excel(writer, sheet_name=data_sheet_name, index=False, startrow=0, startcol=0)

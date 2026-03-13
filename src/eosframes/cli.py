@@ -3,9 +3,10 @@ import os
 import click
 import pandas as pd
 
+from . import hub, ops
+from . import scale as _scale
 from .exceptions import EosframesError
 from .logger import get_logger
-from . import hub, ops, scale as _scale
 
 
 def _err(e: EosframesError) -> click.ClickException:
@@ -44,7 +45,7 @@ def split(input_csv: str, output_folder: str, chunksize: int) -> None:
     try:
         ops.split_csv(input_csv, output_folder, chunksize)
     except EosframesError as e:
-        raise _err(e)
+        raise _err(e) from e
 
 
 @main.command()
@@ -67,7 +68,7 @@ def convert(input: str, output: str) -> None:
     try:
         ops.convert_file(input, output)
     except EosframesError as e:
-        raise _err(e)
+        raise _err(e) from e
 
 
 @main.command()
@@ -106,7 +107,7 @@ def stack(inputs: tuple, output: str, suffix: bool) -> None:
     try:
         ops.stack_files(list(inputs), output, suffix=suffix)
     except EosframesError as e:
-        raise _err(e)
+        raise _err(e) from e
 
 
 @main.command()
@@ -135,7 +136,7 @@ def append(inputs: tuple, output: str) -> None:
     try:
         ops.append_files(list(inputs), output)
     except EosframesError as e:
-        raise _err(e)
+        raise _err(e) from e
 
 
 @main.command()
@@ -155,7 +156,7 @@ def dedupe(input_file: str, output_file: str) -> None:
     try:
         ops.dedupe_file(input_file, output_file)
     except EosframesError as e:
-        raise _err(e)
+        raise _err(e) from e
 
 
 @main.command()
@@ -171,9 +172,9 @@ def summary(input_file: str) -> None:
       eosframes summary eos4e40_v1.csv
       eosframes summary eos4e40_v1.h5
     """
+    from rich import box
     from rich.console import Console
     from rich.table import Table
-    from rich import box
 
     from .naming import parse_name
 
@@ -278,7 +279,7 @@ def info(model_id: str, output: str) -> None:
     try:
         metadata = hub.fetch_metadata(model_id)
     except EosframesError as e:
-        raise _err(e)
+        raise _err(e) from e
 
     def _flatten(v) -> str:
         import json
@@ -329,7 +330,7 @@ def columns(model_id: str, version: str, output: str) -> None:
     try:
         df = hub.fetch_columns(model_id, version)
     except EosframesError as e:
-        raise _err(e)
+        raise _err(e) from e
 
     df.to_csv(output, index=False)
     logger.info("Columns written to %s (%d column(s))", output, len(df))
@@ -370,7 +371,7 @@ def fit(input_file: str, transformer_json: str, method: str, output: str) -> Non
     try:
         out = _scale.fit_scaler_file(input_file, transformer_json, method=method, output_path=output)
     except EosframesError as e:
-        raise _err(e)
+        raise _err(e) from e
     click.echo(out)
 
 
@@ -393,4 +394,4 @@ def apply(input_file: str, transformer_json: str, output_file: str) -> None:
     try:
         _scale.apply_scaler_file(input_file, transformer_json, output_file)
     except EosframesError as e:
-        raise _err(e)
+        raise _err(e) from e

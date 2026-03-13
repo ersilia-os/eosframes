@@ -7,15 +7,54 @@ name = "eosframes"
 version = "0.1.0"
 description = "Ersilia utilities for working with tabular output data"
 authors = ["Ersilia Open Source Initiative <hello@ersilia.io>"]
+license = "MIT"
+readme = "README.md"
+homepage = "https://github.com/ersilia-os/eosframes"
+repository = "https://github.com/ersilia-os/eosframes"
+keywords = ["ersilia", "cheminformatics", "data", "machine-learning"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Chemistry",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 packages = [{include = "eosframes", from = "src"}]
 
 [tool.poetry.dependencies]
 python = ">=3.8"
 pandas = ">=2.0.0"
+numpy = ">=1.24.0"
 h5py = ">=3.10.0"
 requests = ">=2.31"
 click = ">=8.0"
 rich = ">=10.0"
 
+[tool.poetry.group.dev.dependencies]
+ruff = ">=0.4.0"
+pytest = ">=7.0"
+
 [tool.poetry.scripts]
 eosframes = "eosframes.cli:main"
+
+[tool.ruff]
+line-length = 88
+target-version = "py38"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+ignore = [
+    "E501",   # line too long — handled by formatter
+    "B008",   # do not perform function calls in default arguments (Click uses this)
+    "UP007",  # use X | Y for type annotations (not available in 3.8)
+    "UP006",  # use type instead of Type (not available in 3.8)
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["eosframes"]

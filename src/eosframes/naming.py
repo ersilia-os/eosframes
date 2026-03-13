@@ -1,6 +1,6 @@
-import re
 import os
-from typing import Optional, Dict
+import re
+from typing import Dict, Optional
 
 from .utils.utils import is_model_id_valid
 

@@ -1,4 +1,5 @@
 import re
+
 import pandas as pd
 import requests
 
@@ -26,7 +27,7 @@ def chunker(df: pd.DataFrame, chunksize: int = 10000):
 def get_model_id_from_path(path: str) -> str:
     """
     Given a file name, extract the model identifier if it exists.
-    
+
     The model identifier is assumed to follow the pattern 'eosXYYY' where X is a digit and YYY are alphanumeric characters.
     Example valid identifiers: eos42ez, eos4e40, eos3804
 
@@ -34,7 +35,7 @@ def get_model_id_from_path(path: str) -> str:
     ----------
     path : str
         The name of the file or folder from which to extract the model identifier
-    
+
     Returns
     -------
     str
@@ -65,9 +66,7 @@ def is_model_id_valid(model_id: str) -> bool:
     """
     if len(model_id) != 7:
         return False
-    if not model_id.startswith("eos"):
-        return False
-    return True
+    return model_id.startswith("eos")
 
 
 def get_run_columns(model_id: str) -> pd.DataFrame:
@@ -114,8 +113,8 @@ def get_model_slug(model_id: str) -> str:
     try:
         slug = text.split("**Slug:** `")[1].split("`")[0].strip()
         return slug
-    except IndexError:
-        raise ValueError(f"No slug found in README.md for {model_id}")
+    except IndexError as exc:
+        raise ValueError(f"No slug found in README.md for {model_id}") from exc
 
 
 def get_model_title(model_id: str) -> str:
@@ -127,7 +126,7 @@ def get_model_title(model_id: str) -> str:
     ----------
     model_id : str
         Repository name inside the ersilia-os org (e.g. "eos4e40")
-    
+
     Returns
     -------
     str
@@ -142,8 +141,8 @@ def get_model_title(model_id: str) -> str:
     try:
         title = text.split("# ")[1].split("\n")[0].strip()
         return title
-    except IndexError:
-        raise ValueError(f"No title found in README.md for {model_id}")
+    except IndexError as exc:
+        raise ValueError(f"No title found in README.md for {model_id}") from exc
 
 
 def get_colors(n: int) -> list:

@@ -1,5 +1,6 @@
-import pandas as pd
 from typing import List
+
+import pandas as pd
 
 from ..utils.utils import is_model_id_valid
 
@@ -12,7 +13,7 @@ def hstack(df_list: List[pd.DataFrame]) -> pd.DataFrame:
     ----------
     df_list: List[pd.DataFrame]
         List of dataframes to stack
-    
+
     Returns
     -------
     df: pd.DataFrame
@@ -40,7 +41,7 @@ def hstack(df_list: List[pd.DataFrame]) -> pd.DataFrame:
         if model_id is None:
             raise Exception("One of the dataframes does not have a model_id attribute")
         if not is_model_id_valid(model_id):
-            raise Exception("Invalid model_id: {0}".format(model_id))
+            raise Exception(f"Invalid model_id: {model_id}")
 
     if key_list is None:
         do = pd.DataFrame({"input": input_list})
