@@ -38,6 +38,52 @@ eos4e40_v1_chunks/    # folder of chunk CSVs from model eos4e40, version 1
 
 ---
 
+## File Formats
+
+### CSV
+
+Every Ersilia CSV file has this column layout:
+
+| Column | Type | Required | Description |
+|---|---|---|---|
+| `key` | string | yes | Unique molecule identifier (e.g. `EOSK000001`) |
+| `input` | string | yes | Molecule representation fed to the model (typically a SMILES string) |
+| feature columns | numeric or string | yes | One or more columns of model output values |
+
+Example:
+
+```
+key,input,score,probability
+EOSK000001,CCO,0.812,0.934
+EOSK000002,c1ccccc1,0.341,0.102
+EOSK000003,CC(=O)O,0.567,0.445
+```
+
+### H5 (HDF5)
+
+Ersilia H5 files store the same information as CSV in a binary format suited for large datasets. Each file contains four top-level datasets:
+
+| Dataset | dtype | Description |
+|---|---|---|
+| `key` | UTF-8 string | Molecule identifiers (one per row) |
+| `input` | UTF-8 string | Molecule inputs (one per row) |
+| `features` | UTF-8 string | Feature column names (one per feature) |
+| `values` | numeric (e.g. `float32`) | 2-D array of shape `(n_rows, n_features)` |
+
+The `key` dataset is optional; all others are required. Feature column names and values are stored separately and recombined into a DataFrame on read.
+
+```
+eos4e40_v1.h5
+├── key      (N,)  — string
+├── input    (N,)  — string
+├── features (F,)  — string  ["score", "probability"]
+└── values   (N, F) — float32
+```
+
+Use `eosframes convert eos4e40_v1.h5 eos4e40_v1.csv` to inspect an H5 file as plain text, or `eosframes summary eos4e40_v1.h5` to print statistics without converting.
+
+---
+
 ## CLI Reference
 
 ### `eosframes split`
