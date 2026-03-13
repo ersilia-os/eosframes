@@ -499,14 +499,25 @@ def summary(input_file: str) -> None:
     console.print(table)
 
 
-_GITHUB_RAW = "https://raw.githubusercontent.com/ersilia-os/{model_id}/main/{filename}"
+_GITHUB_RAW = "https://raw.githubusercontent.com/ersilia-os/{model_id}/{ref}/{filename}"
 _METADATA_CANDIDATES = ["metadata.json", "metadata.yml", "metadata.yaml"]
+_RUN_COLUMNS_PATH = "model/framework/columns/run_columns.csv"
+
+
+def _version_to_ref(version: str) -> str:
+    """Convert a short version like 'v1' to a git ref, trying 'v1.0.0' then 'main'."""
+    # Try semver tag first (v1 → v1.0.0), then fall back to main
+    import re
+    m = re.match(r'^v(\d+)$', version)
+    if m:
+        return f"v{m.group(1)}.0.0"
+    return version
 
 
 def _fetch_metadata(model_id: str) -> dict:
     """Fetch model metadata from GitHub raw content. Tries JSON then YAML."""
     for filename in _METADATA_CANDIDATES:
-        url = _GITHUB_RAW.format(model_id=model_id, filename=filename)
+        url = _GITHUB_RAW.format(model_id=model_id, ref="main", filename=filename)
         resp = requests.get(url, timeout=15)
         if resp.status_code == 200:
             if filename.endswith(".json"):
@@ -579,4 +590,65 @@ def info(model_id: str, output: str) -> None:
     df.to_csv(output, index=False)
 
     logger.info("Metadata written to %s (%d fields)", output, len(rows))
+    click.echo(output)
+
+
+@main.command()
+@click.argument("model_id")
+@click.argument("version")
+@click.option(
+    "--output", "-o",
+    default=None,
+    type=click.Path(),
+    help="Output CSV path. Defaults to <model_id>_<version>_columns.csv.",
+)
+def columns(model_id: str, version: str, output: str) -> None:
+    """Fetch the run_columns.csv for a model version from GitHub.
+
+    Downloads model/framework/columns/run_columns.csv from the model's
+    GitHub repository. The version is used to resolve the git ref
+    (e.g. 'v1' → tag 'v1.0.0', falling back to 'main').
+
+    \b
+    Examples:
+      eosframes columns eos4e40 v1
+      eosframes columns eos4e40 v1 -o my_columns.csv
+    """
+    logger = get_logger()
+
+    if output is None:
+        output = f"{model_id}_{version}_columns.csv"
+
+    if os.path.exists(output):
+        raise click.ClickException(
+            f"Output file '{output}' already exists. Remove it first."
+        )
+
+    # Try versioned tag first, then fall back to main
+    refs_to_try = [_version_to_ref(version), "main"]
+    seen = []
+    content = None
+    for ref in refs_to_try:
+        if ref in seen:
+            continue
+        seen.append(ref)
+        url = _GITHUB_RAW.format(model_id=model_id, ref=ref, filename=_RUN_COLUMNS_PATH)
+        logger.info("Trying %s", url)
+        resp = requests.get(url, timeout=15)
+        if resp.status_code == 200:
+            content = resp.text
+            break
+
+    if content is None:
+        raise click.ClickException(
+            f"Could not fetch run_columns.csv for model '{model_id}'. "
+            "Make sure the model ID is correct and the repo exists at "
+            f"https://github.com/ersilia-os/{model_id}"
+        )
+
+    with open(output, "w") as fh:
+        fh.write(content)
+
+    n_cols = len(content.strip().splitlines()) - 1  # subtract header
+    logger.info("Columns written to %s (%d column(s))", output, n_cols)
     click.echo(output)
