@@ -1,95 +1,116 @@
+"""Stack Ersilia DataFrames horizontally or vertically."""
+
 from typing import List
 
 import pandas as pd
 
-from ..utils.utils import is_model_id_valid
+from ..exceptions import EosframesError
+from ..naming import is_model_id_valid
 
 
 def hstack(df_list: List[pd.DataFrame]) -> pd.DataFrame:
-    """
-    Stack Ersilia dataframes horizontally
+    """Stack Ersilia DataFrames horizontally (one model per frame).
+
+    All frames must share the same ``input`` column in the same order.
+    Feature columns are suffixed with ``.model_id``.
 
     Parameters
     ----------
-    df_list: List[pd.DataFrame]
-        List of dataframes to stack
+    df_list : list of pd.DataFrame
+        DataFrames to stack. Each must have a ``model_id`` attribute.
 
     Returns
     -------
-    df: pd.DataFrame
-        Horizontally stacked dataframe
-    """
-    prev_input_list = None
-    for df in df_list:
-        cur_input_list = df["input"].tolist()
-        if prev_input_list is None:
-            prev_input_list = cur_input_list
-        if not prev_input_list == cur_input_list:
-            raise Exception("Input columns do not match!")
-        prev_input_list = cur_input_list
+    pd.DataFrame
 
-    input_list = df_list[0]["input"].tolist()
+    Raises
+    ------
+    EosframesError
+        If inputs do not match or a DataFrame has an invalid ``model_id``.
+    """
+    model_ids = [getattr(df, "model_id", None) for df in df_list]
+    for i, model_id in enumerate(model_ids):
+        if model_id is None:
+            raise EosframesError(
+                f"DataFrame #{i} does not have a 'model_id' attribute."
+            )
+        if not is_model_id_valid(model_id):
+            raise EosframesError(f"Invalid model_id: {model_id!r}")
+
+    reference_inputs = df_list[0]["input"].tolist()
+    for i, df in enumerate(df_list[1:], start=2):
+        if df["input"].tolist() != reference_inputs:
+            raise EosframesError(
+                f"Input mismatch: DataFrame #{i} has different inputs or row order "
+                "than DataFrame #1."
+            )
+
     key_list = None
     for df in df_list:
-        columns = list(df.columns)
-        if "key" in columns:
+        if "key" in df.columns:
             key_list = df["key"].tolist()
             break
 
-    model_ids = [getattr(df, "model_id", None) for df in df_list]
-    for model_id in model_ids:
-        if model_id is None:
-            raise Exception("One of the dataframes does not have a model_id attribute")
-        if not is_model_id_valid(model_id):
-            raise Exception(f"Invalid model_id: {model_id}")
-
-    if key_list is None:
-        do = pd.DataFrame({"input": input_list})
-    else:
-        do = pd.DataFrame({"key": key_list, "input": input_list})
+    meta = (
+        {"input": reference_inputs}
+        if key_list is None
+        else {"key": key_list, "input": reference_inputs}
+    )
+    result = pd.DataFrame(meta)
 
     for model_id, df in zip(model_ids, df_list):
-        columns = [c for c in df.columns.tolist() if c not in {"key", "input"}]
-        rename = {c: c + "." + model_id for c in columns}
-        do = pd.concat(
-            [do, df[columns].reset_index(drop=True).rename(columns=rename)], axis=1
+        feature_cols = [c for c in df.columns if c not in {"key", "input"}]
+        block = (
+            df[feature_cols]
+            .reset_index(drop=True)
+            .rename(columns={c: f"{c}.{model_id}" for c in feature_cols})
         )
+        result = pd.concat([result, block], axis=1)
 
-    return do
+    return result
 
 
 def vstack(df_list: List[pd.DataFrame]) -> pd.DataFrame:
-    """
-    Stack Ersilia dataframe vertically
+    """Stack Ersilia DataFrames vertically (same model, multiple batches).
+
+    All frames must share the same columns and the same ``model_id``.
 
     Parameters
     ----------
-    df_list: List[pd.DataFrame]
-        List of dataframes to stack
+    df_list : list of pd.DataFrame
+        DataFrames to stack. Each must have a ``model_id`` attribute.
 
     Returns
     -------
-    df: pd.DataFrame
-        Vertically stacked dataframe
+    pd.DataFrame
+
+    Raises
+    ------
+    EosframesError
+        If columns differ, ``model_id`` attributes are missing, or model IDs
+        do not all match.
     """
-    prev_cols = None
-    for df in df_list:
-        if prev_cols is None:
-            prev_cols = df.columns.tolist()
-        cur_cols = df.columns.tolist()
-        if not prev_cols == cur_cols:
-            raise Exception("Columns do not match")
-        prev_cols = cur_cols
-    do = None
-    for df in df_list:
-        if do is None:
-            do = df
-            continue
-        do = pd.concat([do, df], axis=0)
     model_ids = [getattr(df, "model_id", None) for df in df_list]
-    for model_id in model_ids:
+    for i, model_id in enumerate(model_ids):
         if model_id is None:
-            raise Exception("One of the dataframes does not have a model_id attribute")
-    model_id = list(set(model_ids))[0]
-    do.model_id = model_id
-    return do
+            raise EosframesError(
+                f"DataFrame #{i} does not have a 'model_id' attribute."
+            )
+
+    unique_ids = set(model_ids)
+    if len(unique_ids) > 1:
+        raise EosframesError(
+            f"Cannot vstack DataFrames with different model IDs: {sorted(unique_ids)}"
+        )
+
+    reference_cols = df_list[0].columns.tolist()
+    for i, df in enumerate(df_list[1:], start=2):
+        if df.columns.tolist() != reference_cols:
+            raise EosframesError(
+                f"Column mismatch: DataFrame #{i} has columns {df.columns.tolist()} "
+                f"but expected {reference_cols}."
+            )
+
+    result = pd.concat(df_list, axis=0).reset_index(drop=True)
+    result.model_id = model_ids[0]
+    return result

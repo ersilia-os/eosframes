@@ -3,7 +3,9 @@ from .hub import fetch_columns, fetch_metadata
 from .logger import get_logger
 from .manipulate.stack import hstack, vstack
 from .naming import (
+    get_model_id_from_path,
     get_version_from_path,
+    is_model_id_valid,
     is_valid_name,
     make_chunks_dir_name,
     make_output_name,
@@ -44,7 +46,9 @@ __all__ = [
     "make_output_name",
     "make_chunks_dir_name",
     "get_version_from_path",
+    "get_model_id_from_path",
     "is_valid_name",
+    "is_model_id_valid",
     # Misc
     "get_logger",
     "EosframesError",

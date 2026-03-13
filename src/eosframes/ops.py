@@ -9,19 +9,17 @@ import pandas as pd
 from .exceptions import EosframesError
 from .logger import get_logger
 from .naming import is_valid_name, parse_name
+from .read.read import read_csv, read_h5
 from .utils.utils import chunker
+from .write.write import write_csv, write_h5
 
 
 def _read_file(path: str) -> pd.DataFrame:
     """Read a CSV or H5 file into a DataFrame with model_id set."""
     ext = os.path.splitext(path)[1].lower()
     if ext == ".csv":
-        from .read.read import read_csv
-
         return read_csv(path)
     if ext == ".h5":
-        from .read.read import read_h5
-
         return read_h5(path)
     raise EosframesError(
         f"Unsupported format '{ext}' for '{path}'. Expected .csv or .h5"
@@ -122,15 +120,11 @@ def convert_file(input_path: str, output_path: str) -> None:
         in_ext = os.path.splitext(input_path)[1].lower()
         if in_ext == ".csv":
             if is_valid_name(input_path):
-                from .read.read import read_csv
-
                 df = read_csv(input_path)
             else:
                 logger.info("Reading %s", input_path)
                 df = pd.read_csv(input_path)
         elif in_ext == ".h5":
-            from .read.read import read_h5
-
             df = read_h5(input_path)
         else:
             raise EosframesError(
@@ -141,12 +135,8 @@ def convert_file(input_path: str, output_path: str) -> None:
     df.model_id = model_id
 
     if out_ext == "csv":
-        from .write.write import write_csv
-
         write_csv(df, output_path)
     else:
-        from .write.write import write_h5
-
         write_h5(df, output_path, dtype=np.float32)
 
     logger.info("Done: %s", output_path)
@@ -292,12 +282,8 @@ def append_files(input_paths: List[str], output_path: str) -> None:
     logger.info("Appended %d files → %d rows total", len(dfs), len(result))
 
     if out_ext == "csv":
-        from .write.write import write_csv
-
         write_csv(result, output_path)
     else:
-        from .write.write import write_h5
-
         write_h5(result, output_path, dtype=np.float32)
 
     logger.info("Done: %s", output_path)
@@ -358,12 +344,8 @@ def dedupe_file(input_path: str, output_path: str) -> Tuple[int, int]:
     df.model_id = expected_model_id
 
     if out_ext == "csv":
-        from .write.write import write_csv
-
         write_csv(df, output_path)
     else:
-        from .write.write import write_h5
-
         write_h5(df, output_path, dtype=np.float32)
 
     logger.info("Done: %s", output_path)

@@ -1,136 +1,169 @@
+"""Readers for Ersilia output files (CSV, H5, chunked CSVs)."""
+
 import os
 
 import h5py
 import pandas as pd
 
+from ..exceptions import EosframesError
 from ..logger import get_logger
-from ..utils.utils import get_model_id_from_path
+from ..naming import get_model_id_from_path
 
 
 def read_csv(file_path: str) -> pd.DataFrame:
-    """
-    Read CSV file into a Pandas DataFrame
-    This file is assumed to have the standard Ersilia format, containing columns "key", "input", and feature columns.
+    """Read an Ersilia-format CSV file into a DataFrame.
+
+    The file is expected to have at least ``key`` and ``input`` columns
+    followed by one or more feature columns. The model ID is extracted
+    from the filename and attached as ``df.model_id``.
 
     Parameters
     ----------
-    file_path: str
-        Path to the CSV file
+    file_path : str
+        Path to the CSV file.
 
     Returns
     -------
-    df: pd.DataFrame
-        DataFrame containing the data from the CSV file
+    pd.DataFrame
+
+    Raises
+    ------
+    EosframesError
+        If the file does not exist, has no recognisable model ID in its
+        name, or is missing required columns.
     """
     logger = get_logger()
     if not os.path.exists(file_path):
-        raise Exception(f"File {file_path} does not exist")
+        raise EosframesError(f"File not found: '{file_path}'")
     model_id = get_model_id_from_path(file_path)
     if model_id is None:
-        raise Exception(f"Could not extract model_id from file name {file_path}")
+        raise EosframesError(
+            f"Could not extract a model ID from filename '{file_path}'. "
+            "The filename must contain an Ersilia model identifier (e.g. eos4e40)."
+        )
     logger.info("Reading CSV: %s", file_path)
     df = pd.read_csv(file_path)
-    if "key" not in df.columns:
-        raise Exception(f"File {file_path} does not contain a column named 'key'")
-    if "input" not in df.columns:
-        raise Exception(f"File {file_path} does not contain a column named 'input'")
+    for col in ("key", "input"):
+        if col not in df.columns:
+            raise EosframesError(
+                f"'{file_path}' is missing the required '{col}' column."
+            )
     df.model_id = model_id
     logger.info("Loaded %d rows (model_id=%s)", len(df), model_id)
     return df
 
 
 def read_h5(h5_path: str) -> pd.DataFrame:
-    """
-    Read HDF5 file into a Pandas DataFrame
-    This file is assumed to have the standard Ersilia format, containing values, features, key (optional), and input datasets.
+    """Read an Ersilia-format HDF5 file into a DataFrame.
+
+    Expected datasets: ``values`` (N×F float), ``features`` (F strings),
+    ``input`` (N strings), and optionally ``key`` (N strings).
 
     Parameters
     ----------
-    h5_path: str
-        Path to the HDF5 file
+    h5_path : str
+        Path to the HDF5 file.
 
     Returns
     -------
-    df: pd.DataFrame
-        DataFrame containing the data from the HDF5 file
+    pd.DataFrame
+
+    Raises
+    ------
+    EosframesError
+        If the file does not exist, has no recognisable model ID, or is
+        missing the ``values`` dataset.
     """
     logger = get_logger()
     if not os.path.exists(h5_path):
-        raise Exception(f"File {h5_path} does not exist")
+        raise EosframesError(f"File not found: '{h5_path}'")
     model_id = get_model_id_from_path(h5_path)
     if model_id is None:
-        raise Exception(f"Could not extract model_id from file name {h5_path}")
+        raise EosframesError(
+            f"Could not extract a model ID from filename '{h5_path}'. "
+            "The filename must contain an Ersilia model identifier (e.g. eos4e40)."
+        )
     logger.info("Reading H5: %s", h5_path)
     with h5py.File(h5_path, "r") as f:
         if "values" not in f:
-            raise Exception(f"File {h5_path} does not contain a dataset named 'values'")
+            raise EosframesError(
+                f"'{h5_path}' is missing the required 'values' dataset."
+            )
         values = f["values"][:]
         columns = [x.decode("utf-8") for x in f["features"][:]]
         keys = [x.decode("utf-8") for x in f["key"][:]] if "key" in f else None
         inputs = [x.decode("utf-8") for x in f["input"][:]]
-    if keys is None:
-        df = pd.DataFrame({"input": inputs})
-    else:
-        df = pd.DataFrame({"key": keys, "input": inputs})
-    df_ = pd.DataFrame(values, columns=columns)
-    df = pd.concat([df, df_], axis=1)
+
+    meta = {"input": inputs} if keys is None else {"key": keys, "input": inputs}
+    df = pd.concat([pd.DataFrame(meta), pd.DataFrame(values, columns=columns)], axis=1)
     df.model_id = model_id
     logger.info("Loaded %d rows (model_id=%s)", len(df), model_id)
     return df
 
 
 def read_chunked_csvs(dir_path: str) -> pd.DataFrame:
-    """
-    Read CSV files from a folder, assuming they have a suffix that determines their order.
-    Files must be in the standard Ersilia format, containing columns "key" (optional), "input", and feature columns.
+    """Read a folder of chunk CSVs produced by :func:`~eosframes.split_csv`.
+
+    Files must be named ``chunk_<N>.csv`` (3- or 6-digit zero-padded
+    index) and all share the same column layout. The model ID is
+    extracted from the directory name.
 
     Parameters
     ----------
-    dir_path: str
-        Path to the directory containing the CSV files
+    dir_path : str
+        Path to the directory containing the chunk CSV files.
 
     Returns
     -------
-    df: pd.DataFrame
-        DataFrame containing the concatenated data from the CSV files
+    pd.DataFrame
+        All chunks concatenated in numeric order.
+
+    Raises
+    ------
+    EosframesError
+        If the directory does not exist, has no recognisable model ID,
+        or contains unexpected non-CSV files.
     """
     logger = get_logger()
     if not os.path.exists(dir_path):
-        raise Exception(f"Directory {dir_path} does not exist")
+        raise EosframesError(f"Directory not found: '{dir_path}'")
     model_id = get_model_id_from_path(dir_path)
     if model_id is None:
-        raise Exception(f"Could not extract model_id from directory name {dir_path}")
+        raise EosframesError(
+            f"Could not extract a model ID from directory name '{dir_path}'."
+        )
     logger.info("Reading chunked CSVs from: %s", dir_path)
+
+    filenames = os.listdir(dir_path)
     batch_ids = []
     zfill = 0
     prefixes = []
-    for fn in os.listdir(dir_path):
-        if not fn.endswith(".csv") and not fn.startswith("chunk"):
-            raise Exception(
-                "The folder contains files that are not CSV. Please use a clean folder containing only CSV files in the format chunk_000000.csv"
+    for fn in filenames:
+        if not fn.endswith(".csv") or not fn.startswith("chunk"):
+            raise EosframesError(
+                f"Unexpected file '{fn}' in '{dir_path}'. "
+                "Chunk folders should contain only files named chunk_<N>.csv."
             )
-        batch_id = fn.split("_")[-1].split(".")[0]
-        zfill = len(batch_id)
-        batch_ids += [int(batch_id)]
-        prefix = "_".join(fn.split("_")[0:-1])
-        prefixes += [prefix]
+        parts = fn.split("_")
+        batch_id_str = parts[-1].split(".")[0]
+        zfill = len(batch_id_str)
+        batch_ids.append(int(batch_id_str))
+        prefixes.append("_".join(parts[:-1]))
+
     if len(set(prefixes)) > 1:
-        raise Exception(
-            "Multiple file prefixes specified. It is not save to merge them."
+        raise EosframesError(
+            f"Multiple file prefixes found in '{dir_path}': {set(prefixes)}. "
+            "All chunk files must share the same prefix."
         )
-    prefix = list(prefixes)[0]
-    df = None
-    batch_ids = sorted(batch_ids)
-    for batch_id in batch_ids:
-        fn = f"{prefix}_{str(batch_id).zfill(zfill)}.csv"
-        if df is None:
-            df = pd.read_csv(os.path.join(dir_path, fn))
-            continue
-        df = pd.concat(
-            [df, pd.read_csv(os.path.join(dir_path, fn))], axis=0
-        ).reset_index(drop=True)
+
+    prefix = prefixes[0]
+    frames = [
+        pd.read_csv(os.path.join(dir_path, f"{prefix}_{str(i).zfill(zfill)}.csv"))
+        for i in sorted(batch_ids)
+    ]
+    df = pd.concat(frames, axis=0).reset_index(drop=True)
     df.model_id = model_id
     logger.info(
-        "Loaded %d rows from %d chunks (model_id=%s)", len(df), len(batch_ids), model_id
+        "Loaded %d rows from %d chunks (model_id=%s)", len(df), len(frames), model_id
     )
     return df

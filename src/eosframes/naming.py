@@ -1,38 +1,78 @@
+"""Naming convention parsing and validation for Ersilia output files."""
+
 import os
 import re
 from typing import Dict, Optional
 
-from .utils.utils import is_model_id_valid
+# Matches the eos<digit><3 alphanumeric> pattern anywhere in a string
+_MODEL_ID_RE = re.compile(r"(?<![A-Za-z0-9])eos\d[A-Za-z0-9]{3}(?![A-Za-z0-9])")
 
-# Matches eos<digit><3 alphanumeric>_v<digits> anywhere in the stem (allows leading prefix)
+# Matches <model_id>_<version> at the end of a stem (allows leading prefix tokens)
 _STEM_RE = re.compile(r"(?:^|_)(eos\d[A-Za-z0-9]{3})_(v\d+)$")
 
 VALID_EXTENSIONS = {"csv", "h5"}
 
 
-def parse_name(filename: str) -> Optional[Dict]:
+def is_model_id_valid(model_id: str) -> bool:
+    """Return True if *model_id* matches the Ersilia pattern ``eos<digit><3 alphanumeric>``.
+
+    Parameters
+    ----------
+    model_id : str
+        Candidate model identifier, e.g. ``"eos4e40"``.
+
+    Returns
+    -------
+    bool
     """
-    Parse a filename or directory name and return structured components.
+    return bool(re.fullmatch(r"eos\d[A-Za-z0-9]{3}", model_id))
+
+
+def get_model_id_from_path(path: str) -> Optional[str]:
+    """Extract a model ID from a file or directory path.
+
+    Unlike :func:`parse_name`, no version suffix is required — the function
+    finds the first Ersilia model identifier anywhere in the basename.
+
+    Parameters
+    ----------
+    path : str
+        File path, directory path, or bare filename.
+
+    Returns
+    -------
+    str or None
+        The model identifier if found, otherwise ``None``.
+    """
+    basename = os.path.basename(path.rstrip("/\\"))
+    m = _MODEL_ID_RE.search(basename)
+    return m.group() if m else None
+
+
+def parse_name(filename: str) -> Optional[Dict]:
+    """Parse a filename or directory name and return structured components.
 
     Recognizes:
-      - eos4e40_v1.csv       → name_type="csv"
-      - eos4e40_v1.h5        → name_type="h5"
-      - eos4e40_v1_chunks    → name_type="chunks_dir"
-      - eos4e40_v1_chunks/   → name_type="chunks_dir"
+
+    * ``eos4e40_v1.csv``       → ``name_type="csv"``
+    * ``eos4e40_v1.h5``        → ``name_type="h5"``
+    * ``eos4e40_v1_chunks``    → ``name_type="chunks_dir"``
+    * ``260313_gardp_eos4e40_v1.csv``  → prefix allowed before model_id
 
     Parameters
     ----------
     filename : str
-        Basename or full path. Only the basename is used for matching.
+        Basename or full path; only the basename is used for matching.
 
     Returns
     -------
-    dict with keys: model_id, version, extension, name_type
-    Returns None if the filename does not match the convention.
+    dict or None
+        ``{"model_id", "version", "extension", "name_type"}`` on success,
+        ``None`` if the filename does not match the convention.
     """
-    basename = os.path.basename(filename.rstrip("/"))
+    basename = os.path.basename(filename.rstrip("/\\"))
 
-    # Check for chunks directory
+    # Chunks directory
     if basename.endswith("_chunks"):
         stem = basename[: -len("_chunks")]
         m = _STEM_RE.search(stem)
@@ -45,7 +85,7 @@ def parse_name(filename: str) -> Optional[Dict]:
             }
         return None
 
-    # Check for file with extension
+    # File with extension
     if "." not in basename:
         return None
     stem, ext = basename.rsplit(".", 1)
@@ -63,26 +103,26 @@ def parse_name(filename: str) -> Optional[Dict]:
 
 
 def make_output_name(model_id: str, version: str, ext: str) -> str:
-    """
-    Build a canonical output filename.
+    """Build a canonical output filename.
 
     Parameters
     ----------
     model_id : str
-        e.g. "eos4e40"
+        e.g. ``"eos4e40"``
     version : str
-        e.g. "v1"
+        e.g. ``"v1"``
     ext : str
-        "csv" or "h5" (without leading dot)
+        ``"csv"`` or ``"h5"`` (without leading dot)
 
     Returns
     -------
     str
-        e.g. "eos4e40_v1.csv"
+        e.g. ``"eos4e40_v1.csv"``
 
     Raises
     ------
     ValueError
+        If any argument is invalid.
     """
     if not is_model_id_valid(model_id):
         raise ValueError(f"Invalid model_id: {model_id!r}")
@@ -96,13 +136,17 @@ def make_output_name(model_id: str, version: str, ext: str) -> str:
 
 
 def make_chunks_dir_name(model_id: str, version: str) -> str:
-    """
-    Build a canonical chunks directory name.
+    """Build a canonical chunks directory name.
 
     Returns
     -------
     str
-        e.g. "eos4e40_v1_chunks"
+        e.g. ``"eos4e40_v1_chunks"``
+
+    Raises
+    ------
+    ValueError
+        If any argument is invalid.
     """
     if not is_model_id_valid(model_id):
         raise ValueError(f"Invalid model_id: {model_id!r}")
@@ -112,8 +156,7 @@ def make_chunks_dir_name(model_id: str, version: str) -> str:
 
 
 def get_version_from_path(path: str) -> Optional[str]:
-    """
-    Extract the version token (e.g. "v1") from a filename or path.
+    """Extract the version token (e.g. ``"v1"``) from a filename or path.
 
     Parameters
     ----------
@@ -124,14 +167,12 @@ def get_version_from_path(path: str) -> Optional[str]:
     str or None
     """
     parsed = parse_name(path)
-    if parsed is None:
-        return None
-    return parsed["version"]
+    return parsed["version"] if parsed is not None else None
 
 
 def is_valid_name(path: str) -> bool:
-    """
-    Return True if the basename of `path` follows the naming convention
-    for any recognized output type (csv, h5, or chunks_dir).
+    """Return ``True`` if *path* follows the Ersilia naming convention.
+
+    Accepts csv files, h5 files, and chunks directories.
     """
     return parse_name(path) is not None
