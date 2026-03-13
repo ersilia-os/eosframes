@@ -574,9 +574,9 @@ def info(model_id: str, output: str) -> None:
     logger.info("Fetching metadata for '%s' from GitHub...", model_id)
     metadata = _fetch_metadata(model_id)
 
-    row = {k: _flatten_value(v) for k, v in metadata.items()}
-    df = pd.DataFrame([row])
+    rows = [{"field": k, "value": _flatten_value(v)} for k, v in metadata.items()]
+    df = pd.DataFrame(rows)
     df.to_csv(output, index=False)
 
-    logger.info("Metadata written to %s (%d fields)", output, len(row))
+    logger.info("Metadata written to %s (%d fields)", output, len(rows))
     click.echo(output)
