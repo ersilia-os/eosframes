@@ -106,14 +106,18 @@ def read_chunked_csvs(dir_path: str) -> pd.DataFrame:
     prefixes = []
     for fn in os.listdir(dir_path):
         if not fn.endswith(".csv") and not fn.startswith("chunk"):
-            raise Exception("The folder contains files that are not CSV. Please use a clean folder containing only CSV files in the format chunk_000000.csv")
+            raise Exception(
+                "The folder contains files that are not CSV. Please use a clean folder containing only CSV files in the format chunk_000000.csv"
+            )
         batch_id = fn.split("_")[-1].split(".")[0]
         zfill = len(batch_id)
         batch_ids += [int(batch_id)]
         prefix = "_".join(fn.split("_")[0:-1])
         prefixes += [prefix]
     if len(set(prefixes)) > 1:
-        raise Exception("Multiple file prefixes specified. It is not save to merge them.")
+        raise Exception(
+            "Multiple file prefixes specified. It is not save to merge them."
+        )
     prefix = list(prefixes)[0]
     df = None
     batch_ids = sorted(batch_ids)
@@ -122,7 +126,11 @@ def read_chunked_csvs(dir_path: str) -> pd.DataFrame:
         if df is None:
             df = pd.read_csv(os.path.join(dir_path, fn))
             continue
-        df = pd.concat([df, pd.read_csv(os.path.join(dir_path, fn))], axis=0).reset_index(drop=True)
+        df = pd.concat(
+            [df, pd.read_csv(os.path.join(dir_path, fn))], axis=0
+        ).reset_index(drop=True)
     df.model_id = model_id
-    logger.info("Loaded %d rows from %d chunks (model_id=%s)", len(df), len(batch_ids), model_id)
+    logger.info(
+        "Loaded %d rows from %d chunks (model_id=%s)", len(df), len(batch_ids), model_id
+    )
     return df

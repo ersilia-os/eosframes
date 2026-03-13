@@ -72,9 +72,12 @@ def convert(input: str, output: str) -> None:
 
 
 @main.command()
-@click.argument("inputs", nargs=-1, required=True, type=click.Path(exists=True, dir_okay=False))
+@click.argument(
+    "inputs", nargs=-1, required=True, type=click.Path(exists=True, dir_okay=False)
+)
 @click.option(
-    "--output", "-o",
+    "--output",
+    "-o",
     required=True,
     type=click.Path(),
     help="Output CSV file path.",
@@ -111,9 +114,12 @@ def stack(inputs: tuple, output: str, suffix: bool) -> None:
 
 
 @main.command()
-@click.argument("inputs", nargs=-1, required=True, type=click.Path(exists=True, dir_okay=False))
+@click.argument(
+    "inputs", nargs=-1, required=True, type=click.Path(exists=True, dir_okay=False)
+)
 @click.option(
-    "--output", "-o",
+    "--output",
+    "-o",
     required=True,
     type=click.Path(),
     help="Output file path (must follow naming convention, e.g. eos4e40_v1.csv or eos4e40_v1.h5).",
@@ -221,23 +227,27 @@ def summary(input_file: str) -> None:
     for col in feature_cols:
         series = df[col]
         n_missing = series.isna().sum()
-        missing_str = str(n_missing) if n_missing == 0 else f"[yellow]{n_missing}[/yellow]"
+        missing_str = (
+            str(n_missing) if n_missing == 0 else f"[yellow]{n_missing}[/yellow]"
+        )
 
         if pd.api.types.is_numeric_dtype(series):
             clean = series.dropna()
             if len(clean) == 0:
                 min_s = mean_s = max_s = "[dim]—[/dim]"
             else:
+
                 def _fmt(v):
                     return f"{v:.0f}" if v == int(v) else f"{v:.4g}"
-                min_s  = _fmt(clean.min())
+
+                min_s = _fmt(clean.min())
                 mean_s = _fmt(clean.mean())
-                max_s  = _fmt(clean.max())
+                max_s = _fmt(clean.max())
         else:
             n_unique = series.nunique()
-            min_s  = "[dim]—[/dim]"
+            min_s = "[dim]—[/dim]"
             mean_s = f"[dim]{n_unique} unique[/dim]"
-            max_s  = "[dim]—[/dim]"
+            max_s = "[dim]—[/dim]"
 
         table.add_row(col, str(series.dtype), missing_str, min_s, mean_s, max_s)
 
@@ -247,7 +257,8 @@ def summary(input_file: str) -> None:
 @main.command()
 @click.argument("model_id")
 @click.option(
-    "--output", "-o",
+    "--output",
+    "-o",
     default=None,
     type=click.Path(),
     help="Output CSV path. Defaults to <model_id>_metadata.csv.",
@@ -274,7 +285,9 @@ def info(model_id: str, output: str) -> None:
     if not output.endswith(".csv"):
         raise click.ClickException("Output must be a .csv file.")
     if os.path.exists(output):
-        raise click.ClickException(f"Output file '{output}' already exists. Remove it first.")
+        raise click.ClickException(
+            f"Output file '{output}' already exists. Remove it first."
+        )
 
     try:
         metadata = hub.fetch_metadata(model_id)
@@ -283,6 +296,7 @@ def info(model_id: str, output: str) -> None:
 
     def _flatten(v) -> str:
         import json
+
         if isinstance(v, list):
             return " | ".join(str(item) for item in v)
         if isinstance(v, dict):
@@ -301,7 +315,8 @@ def info(model_id: str, output: str) -> None:
 @click.argument("model_id")
 @click.argument("version")
 @click.option(
-    "--output", "-o",
+    "--output",
+    "-o",
     default=None,
     type=click.Path(),
     help="Output CSV path. Defaults to <model_id>_<version>_columns.csv.",
@@ -325,7 +340,9 @@ def columns(model_id: str, version: str, output: str) -> None:
     if not output.endswith(".csv"):
         raise click.ClickException("Output must be a .csv file.")
     if os.path.exists(output):
-        raise click.ClickException(f"Output file '{output}' already exists. Remove it first.")
+        raise click.ClickException(
+            f"Output file '{output}' already exists. Remove it first."
+        )
 
     try:
         df = hub.fetch_columns(model_id, version)
@@ -340,7 +357,8 @@ def columns(model_id: str, version: str, output: str) -> None:
 @main.command()
 @click.argument("input_file", type=click.Path(exists=True, dir_okay=False))
 @click.option(
-    "--output", "-o",
+    "--output",
+    "-o",
     default=None,
     type=click.Path(),
     help="Output file path. Defaults to <input_stem>_scaled.<ext>.",
@@ -364,7 +382,9 @@ def columns(model_id: str, version: str, output: str) -> None:
     type=click.Choice(_scale.SUPPORTED_METHODS),
     help="Scaling method. Ignored in forward-pass mode.",
 )
-def transform(input_file: str, output: str, params: str, fit: bool, method: str) -> None:
+def transform(
+    input_file: str, output: str, params: str, fit: bool, method: str
+) -> None:
     """Scale the numeric feature columns of INPUT_FILE.
 
     Three modes depending on --params and --fit:
@@ -385,7 +405,9 @@ def transform(input_file: str, output: str, params: str, fit: bool, method: str)
       eosframes transform new_eos4e40_v1.csv --params scaler.json -o scaled.csv
     """
     if fit and params is None:
-        raise click.UsageError("--fit requires --params to specify where to save the parameters.")
+        raise click.UsageError(
+            "--fit requires --params to specify where to save the parameters."
+        )
     try:
         out = _scale.transform_file(
             input_file,

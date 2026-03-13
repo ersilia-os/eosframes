@@ -17,9 +17,11 @@ def _read_file(path: str) -> pd.DataFrame:
     ext = os.path.splitext(path)[1].lower()
     if ext == ".csv":
         from .read.read import read_csv
+
         return read_csv(path)
     if ext == ".h5":
         from .read.read import read_h5
+
         return read_h5(path)
     raise EosframesError(
         f"Unsupported format '{ext}' for '{path}'. Expected .csv or .h5"
@@ -61,7 +63,10 @@ def split_csv(input_path: str, output_folder: str, chunksize: int = 10000) -> in
     os.makedirs(output_folder)
     logger.info(
         "Splitting %d rows into %d chunks (chunksize=%d) → %s",
-        total_rows, num_chunks, chunksize, output_folder,
+        total_rows,
+        num_chunks,
+        chunksize,
+        output_folder,
     )
     for i, chunk in enumerate(chunker(df, chunksize)):
         fname = f"chunk_{str(i).zfill(zfill)}.csv"
@@ -98,7 +103,9 @@ def convert_file(input_path: str, output_path: str) -> None:
             "Expected: <model_id>_<version>.<ext> (e.g. eos4e40_v1.csv or eos4e40_v1.h5)"
         )
     if os.path.exists(output_path):
-        raise EosframesError(f"Output file '{output_path}' already exists. Remove it first.")
+        raise EosframesError(
+            f"Output file '{output_path}' already exists. Remove it first."
+        )
 
     parsed = parse_name(output_path)
     model_id = parsed["model_id"]
@@ -116,12 +123,14 @@ def convert_file(input_path: str, output_path: str) -> None:
         if in_ext == ".csv":
             if is_valid_name(input_path):
                 from .read.read import read_csv
+
                 df = read_csv(input_path)
             else:
                 logger.info("Reading %s", input_path)
                 df = pd.read_csv(input_path)
         elif in_ext == ".h5":
             from .read.read import read_h5
+
             df = read_h5(input_path)
         else:
             raise EosframesError(
@@ -133,17 +142,17 @@ def convert_file(input_path: str, output_path: str) -> None:
 
     if out_ext == "csv":
         from .write.write import write_csv
+
         write_csv(df, output_path)
     else:
         from .write.write import write_h5
+
         write_h5(df, output_path, dtype=np.float32)
 
     logger.info("Done: %s", output_path)
 
 
-def stack_files(
-    input_paths: List[str], output_path: str, suffix: bool = True
-) -> None:
+def stack_files(input_paths: List[str], output_path: str, suffix: bool = True) -> None:
     """Horizontally stack outputs from multiple Ersilia models into one CSV.
 
     All input files must contain the same inputs in the same order. Each
@@ -167,7 +176,9 @@ def stack_files(
     if len(input_paths) < 2:
         raise EosframesError("At least two input files are required for stacking.")
     if os.path.exists(output_path):
-        raise EosframesError(f"Output file '{output_path}' already exists. Remove it first.")
+        raise EosframesError(
+            f"Output file '{output_path}' already exists. Remove it first."
+        )
     if not output_path.endswith(".csv"):
         raise EosframesError("Output must be a .csv file.")
 
@@ -212,7 +223,9 @@ def stack_files(
 
     logger.info(
         "Stacked %d files × %d rows → %d feature columns",
-        len(dfs), len(result), len(result.columns) - len(meta_cols),
+        len(dfs),
+        len(result),
+        len(result.columns) - len(meta_cols),
     )
     result.to_csv(output_path, index=False)
     logger.info("Done: %s", output_path)
@@ -245,7 +258,9 @@ def append_files(input_paths: List[str], output_path: str) -> None:
             "Expected: <model_id>_<version>.<ext> (e.g. eos4e40_v1.csv or eos4e40_v1.h5)"
         )
     if os.path.exists(output_path):
-        raise EosframesError(f"Output file '{output_path}' already exists. Remove it first.")
+        raise EosframesError(
+            f"Output file '{output_path}' already exists. Remove it first."
+        )
 
     out_parsed = parse_name(output_path)
     expected_model_id = out_parsed["model_id"]
@@ -278,9 +293,11 @@ def append_files(input_paths: List[str], output_path: str) -> None:
 
     if out_ext == "csv":
         from .write.write import write_csv
+
         write_csv(result, output_path)
     else:
         from .write.write import write_h5
+
         write_h5(result, output_path, dtype=np.float32)
 
     logger.info("Done: %s", output_path)
@@ -313,7 +330,9 @@ def dedupe_file(input_path: str, output_path: str) -> Tuple[int, int]:
             "Expected: <model_id>_<version>.<ext> (e.g. eos4e40_v1.csv or eos4e40_v1.h5)"
         )
     if os.path.exists(output_path):
-        raise EosframesError(f"Output file '{output_path}' already exists. Remove it first.")
+        raise EosframesError(
+            f"Output file '{output_path}' already exists. Remove it first."
+        )
 
     out_parsed = parse_name(output_path)
     expected_model_id = out_parsed["model_id"]
@@ -340,9 +359,11 @@ def dedupe_file(input_path: str, output_path: str) -> Tuple[int, int]:
 
     if out_ext == "csv":
         from .write.write import write_csv
+
         write_csv(df, output_path)
     else:
         from .write.write import write_h5
+
         write_h5(df, output_path, dtype=np.float32)
 
     logger.info("Done: %s", output_path)

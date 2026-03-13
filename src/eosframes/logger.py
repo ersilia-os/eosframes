@@ -25,6 +25,7 @@ def get_logger() -> logging.Logger:
 
     try:
         from rich.logging import RichHandler
+
         handler = RichHandler(rich_tracebacks=True, show_path=False, markup=False)
         handler.setFormatter(logging.Formatter("%(message)s"))
     except ImportError:

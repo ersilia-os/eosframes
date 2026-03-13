@@ -37,12 +37,16 @@ def write_csv(df: pd.DataFrame, csv_path: str) -> None:
         raise Exception(f"File {csv_path} must have a .csv extension")
     model_id_0 = get_model_id_from_path(csv_path)
     if model_id_0 is None:
-        raise Exception(f"Could not extract model_id from file name {csv_path}! The file name must contain the model identifier")
+        raise Exception(
+            f"Could not extract model_id from file name {csv_path}! The file name must contain the model identifier"
+        )
     model_id_1 = getattr(df, "model_id", None)
     if model_id_1 is None:
         raise Exception("DataFrame does not have a model_id attribute")
     if model_id_0 != model_id_1:
-        raise Exception(f"Model_id from file name ({model_id_0}) does not match model_id from DataFrame ({model_id_1})")
+        raise Exception(
+            f"Model_id from file name ({model_id_0}) does not match model_id from DataFrame ({model_id_1})"
+        )
     df = df.reset_index(drop=True)
     logger.info("Writing CSV: %s (%d rows)", csv_path, len(df))
     df.to_csv(csv_path, index=False)
@@ -71,24 +75,28 @@ def write_h5(df: pd.DataFrame, h5_path: str, dtype: any) -> None:
         raise Exception(f"File {h5_path} exists. Please remove it before saving")
     model_id_0 = get_model_id_from_path(h5_path)
     if model_id_0 is None:
-        raise Exception(f"Could not extract model_id from file name {h5_path}! The file name must contain the model identifier")
+        raise Exception(
+            f"Could not extract model_id from file name {h5_path}! The file name must contain the model identifier"
+        )
     model_id_1 = getattr(df, "model_id", None)
     if model_id_1 is None:
         raise Exception("DataFrame does not have a model_id attribute")
     if model_id_0 != model_id_1:
-        raise Exception(f"Model_id from file name ({model_id_0}) does not match model_id from DataFrame ({model_id_1})")
+        raise Exception(
+            f"Model_id from file name ({model_id_0}) does not match model_id from DataFrame ({model_id_1})"
+        )
     df = df.reset_index(drop=True)
     logger.info("Writing H5: %s (%d rows)", h5_path, len(df))
     with h5py.File(h5_path, "w") as f:
         if "key" in df.columns:
             keys = df["key"].astype(str).tolist()
-            dt = h5py.string_dtype(encoding='utf-8')
+            dt = h5py.string_dtype(encoding="utf-8")
             f.create_dataset("key", data=keys, dtype=dt)
         inputs = df["input"].astype(str).tolist()
-        dt = h5py.string_dtype(encoding='utf-8')
+        dt = h5py.string_dtype(encoding="utf-8")
         f.create_dataset("input", data=inputs, dtype=dt)
         feature_columns = [c for c in df.columns if c not in set(["key", "input"])]
-        dt = h5py.string_dtype(encoding='utf-8')
+        dt = h5py.string_dtype(encoding="utf-8")
         f.create_dataset("features", data=feature_columns, dtype=dt)
         values = df[feature_columns].values
         f.create_dataset("values", data=values, dtype=dtype)
@@ -118,20 +126,28 @@ def write_chunked_csvs(df: pd.DataFrame, dir_path: str, chunksize: int) -> None:
         raise Exception("Chunksize at Ersilia is currently limited to 100000")
     model_id_0 = get_model_id_from_path(dir_path)
     if model_id_0 is None:
-        raise Exception(f"Could not extract model_id from directory {dir_path}! The directory must contain the model identifier")
+        raise Exception(
+            f"Could not extract model_id from directory {dir_path}! The directory must contain the model identifier"
+        )
     model_id_1 = getattr(df, "model_id", None)
     if model_id_1 is None:
         raise Exception("DataFrame does not have a model_id attribute")
     if model_id_0 != model_id_1:
-        raise Exception(f"Model_id from file name ({model_id_0}) does not match model_id from DataFrame ({model_id_1})")
+        raise Exception(
+            f"Model_id from file name ({model_id_0}) does not match model_id from DataFrame ({model_id_1})"
+        )
     df = df.reset_index(drop=True)
     dir_path = os.path.abspath(dir_path)
     if os.path.exists(dir_path):
-        raise Exception(f"Folder {dir_path} exists. Please remove the folder before saving files in there")
+        raise Exception(
+            f"Folder {dir_path} exists. Please remove the folder before saving files in there"
+        )
     os.mkdir(dir_path)
     num_chunks = df.shape[0] / chunksize + 1
     if num_chunks > 999999:
-        raise Exception(f"Too many chunks ({num_chunks}). Maximum number of chunks is 999999. Increase the chunksize if you want to process your full daataset")
+        raise Exception(
+            f"Too many chunks ({num_chunks}). Maximum number of chunks is 999999. Increase the chunksize if you want to process your full daataset"
+        )
     logger.info("Writing %d rows to %s in chunks of %d", len(df), dir_path, chunksize)
     for i, chunk in enumerate(chunker(df, chunksize)):
         file_name = f"chunk_{str(i).zfill(6)}.csv"
@@ -157,7 +173,7 @@ def write_xlsx(df: pd.DataFrame, xlsx_path: str) -> None:
     if not xlsx_path.endswith(".xlsx"):
         raise Exception(f"File {xlsx_path} must have a .xlsx extension")
     if os.path.exists(xlsx_path):
-        #raise Exception("File {0} exists. Please remove it before saving".format(xlsx_path))
+        # raise Exception("File {0} exists. Please remove it before saving".format(xlsx_path))
         os.remove(xlsx_path)
     df.model_id = getattr(df, "model_id", None)
 
@@ -174,7 +190,12 @@ def write_xlsx(df: pd.DataFrame, xlsx_path: str) -> None:
     colors = get_colors(len(model_ids))
     R = []
     for model_id in model_ids:
-        r = [model_id, get_model_slug(model_id), get_model_title(model_id), f"https://github.com/ersilia-os/{model_id}"]
+        r = [
+            model_id,
+            get_model_slug(model_id),
+            get_model_title(model_id),
+            f"https://github.com/ersilia-os/{model_id}",
+        ]
         R += [r]
     dl = pd.DataFrame(R, columns=["model_id", "slug", "title", "link"])
 
@@ -182,25 +203,53 @@ def write_xlsx(df: pd.DataFrame, xlsx_path: str) -> None:
     columns_colors = []
     for i, model_id in enumerate(model_ids):
         dc_ = get_run_columns(model_id)
-        dc_ = pd.concat([pd.DataFrame([model_id]*dc_.shape[0], columns=["model_id"]), dc_], axis=1)
-        columns_colors += [colors[i]]*dc_.shape[0]
+        dc_ = pd.concat(
+            [pd.DataFrame([model_id] * dc_.shape[0], columns=["model_id"]), dc_], axis=1
+        )
+        columns_colors += [colors[i]] * dc_.shape[0]
         dc = dc_ if dc is None else pd.concat([dc, dc_], axis=0).reset_index(drop=True)
 
-    with pd.ExcelWriter(xlsx_path, engine='xlsxwriter') as writer:
+    with pd.ExcelWriter(xlsx_path, engine="xlsxwriter") as writer:
         # Data sheet
-        df.to_excel(writer, sheet_name=data_sheet_name, index=False, startrow=0, startcol=0)
+        df.to_excel(
+            writer, sheet_name=data_sheet_name, index=False, startrow=0, startcol=0
+        )
         worksheet = writer.sheets[data_sheet_name]
         worksheet.freeze_panes(1, 0)
         worksheet.autofilter(0, 0, 0, len(df.columns) - 1)
         for i, column in enumerate(df.columns):
-            max_length = min(max(df[column].astype(str).map(len).max(), len(str(column))) + 2, 50)
+            max_length = min(
+                max(df[column].astype(str).map(len).max(), len(str(column))) + 2, 50
+            )
             worksheet.set_column(i, i, max_length)
         # Legend sheet
-        dl.to_excel(writer, sheet_name=legend_sheet_name, index=False, startrow=1, startcol=0)
-        dc.to_excel(writer, sheet_name=legend_sheet_name, index=False, startrow=1, startcol=dl.shape[1] + 1)
+        dl.to_excel(
+            writer, sheet_name=legend_sheet_name, index=False, startrow=1, startcol=0
+        )
+        dc.to_excel(
+            writer,
+            sheet_name=legend_sheet_name,
+            index=False,
+            startrow=1,
+            startcol=dl.shape[1] + 1,
+        )
         worksheet = writer.sheets[legend_sheet_name]
-        worksheet.merge_range(0, 0, 0, dl.shape[1] - 1, "Ersilia models", writer.book.add_format({'align': 'center', 'bold': True}))
-        worksheet.merge_range(0, dl.shape[1] + 1, 0, dl.shape[1] + dc.shape[1], "Columns", writer.book.add_format({'align': 'center', 'bold': True}))
+        worksheet.merge_range(
+            0,
+            0,
+            0,
+            dl.shape[1] - 1,
+            "Ersilia models",
+            writer.book.add_format({"align": "center", "bold": True}),
+        )
+        worksheet.merge_range(
+            0,
+            dl.shape[1] + 1,
+            0,
+            dl.shape[1] + dc.shape[1],
+            "Columns",
+            writer.book.add_format({"align": "center", "bold": True}),
+        )
         worksheet.freeze_panes(2, 0)
         worksheet.set_column(0, dl.shape[1] - 1, 30)
         worksheet.set_column(dl.shape[1], dl.shape[1] + dc.shape[1] - 1, 30)

@@ -50,6 +50,7 @@ def fetch_metadata(model_id: str) -> dict:
                 return json.loads(resp.text)
             try:
                 import yaml
+
                 return yaml.safe_load(resp.text)
             except ImportError as exc:
                 raise EosframesError(

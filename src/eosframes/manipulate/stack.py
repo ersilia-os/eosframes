@@ -51,7 +51,9 @@ def hstack(df_list: List[pd.DataFrame]) -> pd.DataFrame:
     for model_id, df in zip(model_ids, df_list):
         columns = [c for c in df.columns.tolist() if c not in {"key", "input"}]
         rename = {c: c + "." + model_id for c in columns}
-        do = pd.concat([do, df[columns].reset_index(drop=True).rename(columns=rename)], axis=1)
+        do = pd.concat(
+            [do, df[columns].reset_index(drop=True).rename(columns=rename)], axis=1
+        )
 
     return do
 
@@ -91,4 +93,3 @@ def vstack(df_list: List[pd.DataFrame]) -> pd.DataFrame:
     model_id = list(set(model_ids))[0]
     do.model_id = model_id
     return do
-

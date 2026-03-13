@@ -26,6 +26,7 @@ SUPPORTED_METHODS = ("standard",)
 # Low-level DataFrame API
 # ---------------------------------------------------------------------------
 
+
 def fit_scaler(df: pd.DataFrame, method: str = "standard") -> dict:
     """Fit a scaler on the numeric feature columns of a DataFrame.
 
@@ -139,6 +140,7 @@ def apply_scaler(df: pd.DataFrame, params: dict) -> pd.DataFrame:
 # File-level API
 # ---------------------------------------------------------------------------
 
+
 def _write_df(df: pd.DataFrame, output_path: str) -> None:
     """Write a DataFrame to CSV or H5, bypassing the naming convention check."""
     ext = os.path.splitext(output_path)[1].lower()
@@ -151,13 +153,13 @@ def _write_df(df: pd.DataFrame, output_path: str) -> None:
             if "key" in df.columns:
                 f.create_dataset("key", data=df["key"].astype(str).tolist(), dtype=dt)
             if "input" in df.columns:
-                f.create_dataset("input", data=df["input"].astype(str).tolist(), dtype=dt)
+                f.create_dataset(
+                    "input", data=df["input"].astype(str).tolist(), dtype=dt
+                )
             f.create_dataset("features", data=feat_cols, dtype=dt)
             f.create_dataset("values", data=df[feat_cols].values, dtype=np.float32)
     else:
-        raise EosframesError(
-            f"Unsupported output format '{ext}'. Expected .csv or .h5"
-        )
+        raise EosframesError(f"Unsupported output format '{ext}'. Expected .csv or .h5")
 
 
 def transform_file(
@@ -225,6 +227,7 @@ def transform_file(
         )
 
     from .ops import _read_file
+
     df = _read_file(input_path)
 
     if params is not None and not fit:

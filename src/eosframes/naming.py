@@ -5,7 +5,7 @@ from typing import Dict, Optional
 from .utils.utils import is_model_id_valid
 
 # Matches eos<digit><3 alphanumeric>_v<digits> anywhere in the stem (allows leading prefix)
-_STEM_RE = re.compile(r'(?:^|_)(eos\d[A-Za-z0-9]{3})_(v\d+)$')
+_STEM_RE = re.compile(r"(?:^|_)(eos\d[A-Za-z0-9]{3})_(v\d+)$")
 
 VALID_EXTENSIONS = {"csv", "h5"}
 
@@ -86,10 +86,12 @@ def make_output_name(model_id: str, version: str, ext: str) -> str:
     """
     if not is_model_id_valid(model_id):
         raise ValueError(f"Invalid model_id: {model_id!r}")
-    if not re.match(r'^v\d+$', version):
+    if not re.match(r"^v\d+$", version):
         raise ValueError(f"Invalid version: {version!r}. Expected format: v1, v2, ...")
     if ext not in VALID_EXTENSIONS:
-        raise ValueError(f"Unsupported extension: {ext!r}. Must be one of {VALID_EXTENSIONS}")
+        raise ValueError(
+            f"Unsupported extension: {ext!r}. Must be one of {VALID_EXTENSIONS}"
+        )
     return f"{model_id}_{version}.{ext}"
 
 
@@ -104,7 +106,7 @@ def make_chunks_dir_name(model_id: str, version: str) -> str:
     """
     if not is_model_id_valid(model_id):
         raise ValueError(f"Invalid model_id: {model_id!r}")
-    if not re.match(r'^v\d+$', version):
+    if not re.match(r"^v\d+$", version):
         raise ValueError(f"Invalid version: {version!r}. Expected format: v1, v2, ...")
     return f"{model_id}_{version}_chunks"
 
