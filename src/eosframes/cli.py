@@ -1,14 +1,15 @@
-import json
 import os
 
 import click
-import numpy as np
 import pandas as pd
-import requests
 
+from .exceptions import EosframesError
 from .logger import get_logger
-from .naming import is_valid_name, parse_name
-from .utils.utils import chunker
+from . import hub, ops
+
+
+def _err(e: EosframesError) -> click.ClickException:
+    return click.ClickException(str(e))
 
 
 @click.group()
@@ -19,7 +20,6 @@ def main():
     File naming convention for outputs: <model_id>_<version>.<ext>
     (e.g. eos4e40_v1.csv, eos4e40_v1.h5, eos4e40_v1_chunks/)
     """
-    pass
 
 
 @main.command()
@@ -41,32 +41,10 @@ def split(input_csv: str, output_folder: str, chunksize: int) -> None:
     Chunk files are named chunk_000.csv (3-digit padding) or
     chunk_000000.csv (6-digit) when more than 999 chunks are produced.
     """
-    logger = get_logger()
-
-    df = pd.read_csv(input_csv)
-    total_rows = len(df)
-    num_chunks = (total_rows + chunksize - 1) // chunksize
-    zfill = 6 if num_chunks >= 1000 else 3
-
-    if os.path.exists(output_folder):
-        raise click.ClickException(
-            f"Output folder '{output_folder}' already exists. "
-            "Remove it or choose a different name."
-        )
-    os.makedirs(output_folder)
-
-    logger.info(
-        "Splitting %d rows into %d chunks (chunksize=%d) → %s",
-        total_rows,
-        num_chunks,
-        chunksize,
-        output_folder,
-    )
-    for i, chunk in enumerate(chunker(df, chunksize)):
-        fname = f"chunk_{str(i).zfill(zfill)}.csv"
-        chunk.to_csv(os.path.join(output_folder, fname), index=False)
-
-    logger.info("Split complete: %d chunks written to %s", num_chunks, output_folder)
+    try:
+        ops.split_csv(input_csv, output_folder, chunksize)
+    except EosframesError as e:
+        raise _err(e)
 
 
 @main.command()
@@ -86,82 +64,10 @@ def convert(input: str, output: str) -> None:
       .csv     → eos4e40_v1.h5    (CSV to H5)
       .h5      → eos4e40_v1.csv   (H5 to CSV)
     """
-    logger = get_logger()
-
-    # Validate output naming convention
-    if not is_valid_name(output):
-        raise click.ClickException(
-            f"OUTPUT '{output}' does not follow the naming convention. "
-            "Expected: <model_id>_<version>.<ext> "
-            "(e.g. eos4e40_v1.csv or eos4e40_v1.h5)"
-        )
-
-    if os.path.exists(output):
-        raise click.ClickException(
-            f"Output file '{output}' already exists. Remove it first."
-        )
-
-    parsed = parse_name(output)
-    model_id = parsed["model_id"]
-    out_ext = parsed["extension"]  # "csv" or "h5"
-
-    # Read input
-    if os.path.isdir(input):
-        csv_files = sorted(f for f in os.listdir(input) if f.endswith(".csv"))
-        if not csv_files:
-            raise click.ClickException(f"No CSV files found in '{input}'")
-        logger.info("Reading %d chunk files from %s", len(csv_files), input)
-        frames = [pd.read_csv(os.path.join(input, f)) for f in csv_files]
-        df = pd.concat(frames, axis=0).reset_index(drop=True)
-        df.model_id = model_id
-    else:
-        in_ext = os.path.splitext(input)[1].lower()
-        if in_ext == ".csv":
-            # If input follows naming convention, use read_csv (validates model_id);
-            # otherwise load raw and take model_id from output name.
-            if is_valid_name(input):
-                from .read.read import read_csv
-                df = read_csv(input)
-            else:
-                logger.info("Reading %s", input)
-                df = pd.read_csv(input)
-                df.model_id = model_id
-        elif in_ext == ".h5":
-            from .read.read import read_h5
-            df = read_h5(input)
-        else:
-            raise click.ClickException(
-                f"Unsupported input format '{in_ext}'. Expected .csv or .h5"
-            )
-
-    logger.info("Converting %s → %s", input, output)
-
-    if out_ext == "csv":
-        # Ensure model_id attribute is set on df before writing
-        df.model_id = model_id
-        from .write.write import write_csv
-        write_csv(df, output)
-    else:
-        df.model_id = model_id
-        from .write.write import write_h5
-        write_h5(df, output, dtype=np.float32)
-
-    logger.info("Done: %s", output)
-
-
-def _read_file(path: str) -> pd.DataFrame:
-    """Read a CSV or H5 file, returning a DataFrame with model_id set."""
-    ext = os.path.splitext(path)[1].lower()
-    if ext == ".csv":
-        from .read.read import read_csv
-        return read_csv(path)
-    elif ext == ".h5":
-        from .read.read import read_h5
-        return read_h5(path)
-    else:
-        raise click.ClickException(
-            f"Unsupported file format '{ext}' for '{path}'. Expected .csv or .h5"
-        )
+    try:
+        ops.convert_file(input, output)
+    except EosframesError as e:
+        raise _err(e)
 
 
 @main.command()
@@ -197,73 +103,10 @@ def stack(inputs: tuple, output: str, suffix: bool) -> None:
       eosframes stack eos4e40_v1.csv eos3804_v1.csv -o stacked.csv
       eosframes stack eos4e40_v1.csv eos3804_v1.h5  -o stacked.csv --no-suffix
     """
-    logger = get_logger()
-
-    if len(inputs) < 2:
-        raise click.ClickException("At least two input files are required for stacking.")
-
-    if os.path.exists(output):
-        raise click.ClickException(
-            f"Output file '{output}' already exists. Remove it first."
-        )
-
-    if not output.endswith(".csv"):
-        raise click.ClickException("OUTPUT must be a .csv file.")
-
-    # Read all input files
-    dfs = []
-    seen_model_ids = []
-    for path in inputs:
-        if not is_valid_name(path):
-            raise click.ClickException(
-                f"'{path}' does not follow the naming convention. "
-                "Expected: <model_id>_<version>.<ext> (e.g. eos4e40_v1.csv)"
-            )
-        logger.info("Reading %s", path)
-        df = _read_file(path)
-        model_id = getattr(df, "model_id", None)
-        if model_id in seen_model_ids:
-            raise click.ClickException(
-                f"Model '{model_id}' appears more than once in the input list. "
-                "Each model must be unique when stacking."
-            )
-        seen_model_ids.append(model_id)
-        dfs.append(df)
-
-    # Validate that all inputs are identical and in the same order
-    reference_inputs = dfs[0]["input"].tolist()
-    for i, df in enumerate(dfs[1:], start=2):
-        if "input" not in df.columns:
-            raise click.ClickException(
-                f"File #{i} does not contain an 'input' column."
-            )
-        if df["input"].tolist() != reference_inputs:
-            raise click.ClickException(
-                f"Input mismatch: file #{i} has different inputs or a different row order "
-                f"than file #1. Stacking requires all files to have identical inputs in the same order."
-            )
-
-    # Build the stacked dataframe
-    # Start with key + input from the first file
-    meta_cols = [c for c in ("key", "input") if c in dfs[0].columns]
-    result = dfs[0][meta_cols].reset_index(drop=True).copy()
-
-    for df in dfs:
-        model_id = getattr(df, "model_id", None)
-        feature_cols = [c for c in df.columns if c not in {"key", "input"}]
-        block = df[feature_cols].reset_index(drop=True)
-        if suffix:
-            block = block.rename(columns={c: f"{c}.{model_id}" for c in feature_cols})
-        result = pd.concat([result, block], axis=1)
-
-    logger.info(
-        "Stacked %d files × %d rows → %d feature columns",
-        len(dfs),
-        len(result),
-        len(result.columns) - len(meta_cols),
-    )
-    result.to_csv(output, index=False)
-    logger.info("Done: %s", output)
+    try:
+        ops.stack_files(list(inputs), output, suffix=suffix)
+    except EosframesError as e:
+        raise _err(e)
 
 
 @main.command()
@@ -289,65 +132,10 @@ def append(inputs: tuple, output: str) -> None:
       eosframes append eos4e40_v1_batch1.csv eos4e40_v1_batch2.csv -o eos4e40_v1.csv
       eosframes append eos4e40_v1_part1.h5 eos4e40_v1_part2.h5    -o eos4e40_v1.h5
     """
-    logger = get_logger()
-
-    if len(inputs) < 2:
-        raise click.ClickException("At least two input files are required for appending.")
-
-    if not is_valid_name(output):
-        raise click.ClickException(
-            f"OUTPUT '{output}' does not follow the naming convention. "
-            "Expected: <model_id>_<version>.<ext> (e.g. eos4e40_v1.csv or eos4e40_v1.h5)"
-        )
-
-    if os.path.exists(output):
-        raise click.ClickException(
-            f"Output file '{output}' already exists. Remove it first."
-        )
-
-    out_parsed = parse_name(output)
-    expected_model_id = out_parsed["model_id"]
-    out_ext = out_parsed["extension"]
-
-    # Read all input files, validating model_id consistency
-    dfs = []
-    reference_columns = None
-    for path in inputs:
-        logger.info("Reading %s", path)
-        df = _read_file(path)
-        model_id = getattr(df, "model_id", None)
-        if model_id != expected_model_id:
-            raise click.ClickException(
-                f"Model ID mismatch: '{path}' has model '{model_id}' "
-                f"but output expects '{expected_model_id}'."
-            )
-        cols = list(df.columns)
-        if reference_columns is None:
-            reference_columns = cols
-        elif cols != reference_columns:
-            raise click.ClickException(
-                f"Column mismatch: '{path}' has columns {cols} "
-                f"but expected {reference_columns}."
-            )
-        dfs.append(df)
-
-    result = pd.concat(dfs, axis=0).reset_index(drop=True)
-    result.model_id = expected_model_id
-
-    logger.info(
-        "Appended %d files → %d rows total",
-        len(dfs),
-        len(result),
-    )
-
-    if out_ext == "csv":
-        from .write.write import write_csv
-        write_csv(result, output)
-    else:
-        from .write.write import write_h5
-        write_h5(result, output, dtype=np.float32)
-
-    logger.info("Done: %s", output)
+    try:
+        ops.append_files(list(inputs), output)
+    except EosframesError as e:
+        raise _err(e)
 
 
 @main.command()
@@ -364,53 +152,10 @@ def dedupe(input_file: str, output_file: str) -> None:
     Example:
       eosframes dedupe eos4e40_v1_raw.csv eos4e40_v1.csv
     """
-    logger = get_logger()
-
-    if not is_valid_name(output_file):
-        raise click.ClickException(
-            f"OUTPUT '{output_file}' does not follow the naming convention. "
-            "Expected: <model_id>_<version>.<ext> (e.g. eos4e40_v1.csv or eos4e40_v1.h5)"
-        )
-
-    if os.path.exists(output_file):
-        raise click.ClickException(
-            f"Output file '{output_file}' already exists. Remove it first."
-        )
-
-    out_parsed = parse_name(output_file)
-    expected_model_id = out_parsed["model_id"]
-    out_ext = out_parsed["extension"]
-
-    logger.info("Reading %s", input_file)
-    df = _read_file(input_file)
-
-    model_id = getattr(df, "model_id", None)
-    if model_id != expected_model_id:
-        raise click.ClickException(
-            f"Model ID mismatch: '{input_file}' has model '{model_id}' "
-            f"but output expects '{expected_model_id}'."
-        )
-
-    if "key" not in df.columns:
-        raise click.ClickException(
-            f"'{input_file}' does not contain a 'key' column."
-        )
-
-    before = len(df)
-    df = df.drop_duplicates(subset="key", keep="first").reset_index(drop=True)
-    removed = before - len(df)
-    logger.info("Removed %d duplicate(s), %d rows remaining", removed, len(df))
-
-    df.model_id = expected_model_id
-
-    if out_ext == "csv":
-        from .write.write import write_csv
-        write_csv(df, output_file)
-    else:
-        from .write.write import write_h5
-        write_h5(df, output_file, dtype=np.float32)
-
-    logger.info("Done: %s", output_file)
+    try:
+        ops.dedupe_file(input_file, output_file)
+    except EosframesError as e:
+        raise _err(e)
 
 
 @main.command()
@@ -430,8 +175,10 @@ def summary(input_file: str) -> None:
     from rich.table import Table
     from rich import box
 
+    from .naming import parse_name
+
     console = Console()
-    df = _read_file(input_file)
+    df = ops._read_file(input_file)
 
     model_id = getattr(df, "model_id", "unknown")
     parsed = parse_name(input_file)
@@ -442,7 +189,6 @@ def summary(input_file: str) -> None:
     feature_cols = [c for c in df.columns if c not in {"key", "input"}]
     has_key = "key" in df.columns
 
-    # ── File info panel ──────────────────────────────────────────────────────
     console.print()
     console.rule(f"[bold cyan]{os.path.basename(input_file)}[/bold cyan]")
     console.print(f"  [bold]Model ID:[/bold]  {model_id}")
@@ -457,7 +203,6 @@ def summary(input_file: str) -> None:
         console.print("\n  [dim]No feature columns found.[/dim]")
         return
 
-    # ── Per-feature statistics table ─────────────────────────────────────────
     console.print()
     table = Table(
         box=box.SIMPLE_HEAD,
@@ -482,7 +227,6 @@ def summary(input_file: str) -> None:
             if len(clean) == 0:
                 min_s = mean_s = max_s = "[dim]—[/dim]"
             else:
-                # Format integers without decimal point
                 def _fmt(v):
                     return f"{v:.0f}" if v == int(v) else f"{v:.4g}"
                 min_s  = _fmt(clean.min())
@@ -499,56 +243,6 @@ def summary(input_file: str) -> None:
     console.print(table)
 
 
-_GITHUB_RAW = "https://raw.githubusercontent.com/ersilia-os/{model_id}/{ref}/{filename}"
-_METADATA_CANDIDATES = ["metadata.json", "metadata.yml", "metadata.yaml"]
-_RUN_COLUMNS_PATH = "model/framework/columns/run_columns.csv"
-
-
-def _version_to_ref(version: str) -> str:
-    """Convert a short version like 'v1' to a git ref, trying 'v1.0.0' then 'main'."""
-    # Try semver tag first (v1 → v1.0.0), then fall back to main
-    import re
-    m = re.match(r'^v(\d+)$', version)
-    if m:
-        return f"v{m.group(1)}.0.0"
-    return version
-
-
-def _fetch_metadata(model_id: str) -> dict:
-    """Fetch model metadata from GitHub raw content. Tries JSON then YAML."""
-    for filename in _METADATA_CANDIDATES:
-        url = _GITHUB_RAW.format(model_id=model_id, ref="main", filename=filename)
-        resp = requests.get(url, timeout=15)
-        if resp.status_code == 200:
-            if filename.endswith(".json"):
-                return json.loads(resp.text)
-            else:
-                try:
-                    import yaml
-                    return yaml.safe_load(resp.text)
-                except ImportError:
-                    raise click.ClickException(
-                        f"Model '{model_id}' has a YAML metadata file but 'pyyaml' is not installed. "
-                        "Install it with: pip install pyyaml"
-                    )
-    raise click.ClickException(
-        f"Could not fetch metadata for model '{model_id}'. "
-        "Make sure the model ID is correct and the repo exists at "
-        f"https://github.com/ersilia-os/{model_id}"
-    )
-
-
-def _flatten_value(v) -> str:
-    """Convert a metadata value to a plain string for CSV output."""
-    if isinstance(v, list):
-        return " | ".join(str(item) for item in v)
-    if isinstance(v, dict):
-        return json.dumps(v)
-    if v is None:
-        return ""
-    return str(v)
-
-
 @main.command()
 @click.argument("model_id")
 @click.option(
@@ -562,7 +256,7 @@ def info(model_id: str, output: str) -> None:
 
     Retrieves the metadata.json (or metadata.yml) from the model's GitHub
     repository at https://github.com/ersilia-os/<MODEL_ID> and writes all
-    fields as columns in a single-row CSV file.
+    fields as a two-column CSV (field, value).
 
     List-valued fields are joined with ' | '. The output file does not need
     to follow the Ersilia naming convention.
@@ -576,22 +270,28 @@ def info(model_id: str, output: str) -> None:
 
     if output is None:
         output = f"{model_id}_metadata.csv"
-
     if not output.endswith(".csv"):
         raise click.ClickException("Output must be a .csv file.")
-
     if os.path.exists(output):
-        raise click.ClickException(
-            f"Output file '{output}' already exists. Remove it first."
-        )
+        raise click.ClickException(f"Output file '{output}' already exists. Remove it first.")
 
-    logger.info("Fetching metadata for '%s' from GitHub...", model_id)
-    metadata = _fetch_metadata(model_id)
+    try:
+        metadata = hub.fetch_metadata(model_id)
+    except EosframesError as e:
+        raise _err(e)
 
-    rows = [{"field": k, "value": _flatten_value(v)} for k, v in metadata.items()]
-    df = pd.DataFrame(rows)
-    df.to_csv(output, index=False)
+    def _flatten(v) -> str:
+        import json
+        if isinstance(v, list):
+            return " | ".join(str(item) for item in v)
+        if isinstance(v, dict):
+            return json.dumps(v)
+        if v is None:
+            return ""
+        return str(v)
 
+    rows = [{"field": k, "value": _flatten(v)} for k, v in metadata.items()]
+    pd.DataFrame(rows).to_csv(output, index=False)
     logger.info("Metadata written to %s (%d fields)", output, len(rows))
     click.echo(output)
 
@@ -621,40 +321,16 @@ def columns(model_id: str, version: str, output: str) -> None:
 
     if output is None:
         output = f"{model_id}_{version}_columns.csv"
-
     if not output.endswith(".csv"):
         raise click.ClickException("Output must be a .csv file.")
-
     if os.path.exists(output):
-        raise click.ClickException(
-            f"Output file '{output}' already exists. Remove it first."
-        )
+        raise click.ClickException(f"Output file '{output}' already exists. Remove it first.")
 
-    # Try versioned tag first, then fall back to main
-    refs_to_try = [_version_to_ref(version), "main"]
-    seen = []
-    content = None
-    for ref in refs_to_try:
-        if ref in seen:
-            continue
-        seen.append(ref)
-        url = _GITHUB_RAW.format(model_id=model_id, ref=ref, filename=_RUN_COLUMNS_PATH)
-        logger.info("Trying %s", url)
-        resp = requests.get(url, timeout=15)
-        if resp.status_code == 200:
-            content = resp.text
-            break
+    try:
+        df = hub.fetch_columns(model_id, version)
+    except EosframesError as e:
+        raise _err(e)
 
-    if content is None:
-        raise click.ClickException(
-            f"Could not fetch run_columns.csv for model '{model_id}'. "
-            "Make sure the model ID is correct and the repo exists at "
-            f"https://github.com/ersilia-os/{model_id}"
-        )
-
-    with open(output, "w") as fh:
-        fh.write(content)
-
-    n_cols = len(content.strip().splitlines()) - 1  # subtract header
-    logger.info("Columns written to %s (%d column(s))", output, n_cols)
+    df.to_csv(output, index=False)
+    logger.info("Columns written to %s (%d column(s))", output, len(df))
     click.echo(output)
