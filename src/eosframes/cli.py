@@ -1,8 +1,10 @@
+import json
 import os
 
 import click
 import numpy as np
 import pandas as pd
+import requests
 
 from .logger import get_logger
 from .naming import is_valid_name, parse_name
@@ -495,3 +497,86 @@ def summary(input_file: str) -> None:
         table.add_row(col, str(series.dtype), missing_str, min_s, mean_s, max_s)
 
     console.print(table)
+
+
+_GITHUB_RAW = "https://raw.githubusercontent.com/ersilia-os/{model_id}/main/{filename}"
+_METADATA_CANDIDATES = ["metadata.json", "metadata.yml", "metadata.yaml"]
+
+
+def _fetch_metadata(model_id: str) -> dict:
+    """Fetch model metadata from GitHub raw content. Tries JSON then YAML."""
+    for filename in _METADATA_CANDIDATES:
+        url = _GITHUB_RAW.format(model_id=model_id, filename=filename)
+        resp = requests.get(url, timeout=15)
+        if resp.status_code == 200:
+            if filename.endswith(".json"):
+                return json.loads(resp.text)
+            else:
+                try:
+                    import yaml
+                    return yaml.safe_load(resp.text)
+                except ImportError:
+                    raise click.ClickException(
+                        f"Model '{model_id}' has a YAML metadata file but 'pyyaml' is not installed. "
+                        "Install it with: pip install pyyaml"
+                    )
+    raise click.ClickException(
+        f"Could not fetch metadata for model '{model_id}'. "
+        "Make sure the model ID is correct and the repo exists at "
+        f"https://github.com/ersilia-os/{model_id}"
+    )
+
+
+def _flatten_value(v) -> str:
+    """Convert a metadata value to a plain string for CSV output."""
+    if isinstance(v, list):
+        return " | ".join(str(item) for item in v)
+    if isinstance(v, dict):
+        return json.dumps(v)
+    if v is None:
+        return ""
+    return str(v)
+
+
+@main.command()
+@click.argument("model_id")
+@click.option(
+    "--output", "-o",
+    default=None,
+    type=click.Path(),
+    help="Output CSV path. Defaults to <model_id>_metadata.csv.",
+)
+def info(model_id: str, output: str) -> None:
+    """Fetch metadata for a model from GitHub and save it as a CSV.
+
+    Retrieves the metadata.json (or metadata.yml) from the model's GitHub
+    repository at https://github.com/ersilia-os/<MODEL_ID> and writes all
+    fields as columns in a single-row CSV file.
+
+    List-valued fields are joined with ' | '. The output file does not need
+    to follow the Ersilia naming convention.
+
+    \b
+    Examples:
+      eosframes info eos4e40
+      eosframes info eos4e40 -o my_metadata.csv
+    """
+    logger = get_logger()
+
+    if output is None:
+        output = f"{model_id}_metadata.csv"
+
+    if os.path.exists(output):
+        raise click.ClickException(
+            f"Output file '{output}' already exists. Remove it first."
+        )
+
+    logger.info("Fetching metadata for '%s' from GitHub...", model_id)
+    metadata = _fetch_metadata(model_id)
+
+    row = {k: _flatten_value(v) for k, v in metadata.items()}
+    df = pd.DataFrame([row])
+    df.to_csv(output, index=False)
+
+    logger.info("Metadata written to %s (%d fields)", output, len(row))
+    click.echo(output)
