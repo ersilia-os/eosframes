@@ -1,4 +1,4 @@
-# eosframes
+# Manipulating Ersilia's dataframes
 
 `eosframes` is a Python library and CLI tool for manipulating inputs and outputs from the [Ersilia Model Hub](https://github.com/ersilia-os/ersilia). It handles splitting, assembling, converting, scaling, and inspecting tabular model outputs in CSV and HDF5 formats — all while enforcing Ersilia's file naming conventions.
 
