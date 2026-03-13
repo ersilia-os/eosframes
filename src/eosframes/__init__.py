@@ -12,6 +12,7 @@ from .logger import get_logger
 from .exceptions import EosframesError
 from .ops import split_csv, convert_file, stack_files, append_files, dedupe_file
 from .hub import fetch_metadata, fetch_columns
+from .scale import fit_scaler, apply_scaler, fit_scaler_file, apply_scaler_file
 
 __all__ = [
     # Low-level I/O
@@ -34,6 +35,11 @@ __all__ = [
     # GitHub / hub
     "fetch_metadata",
     "fetch_columns",
+    # Scaling
+    "fit_scaler",
+    "apply_scaler",
+    "fit_scaler_file",
+    "apply_scaler_file",
     # Naming utilities
     "parse_name",
     "make_output_name",
