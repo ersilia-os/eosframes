@@ -50,17 +50,20 @@ eosframes split INPUT_CSV OUTPUT_FOLDER [--chunksize N]
 
 | Argument / Option | Description |
 |---|---|
-| `INPUT_CSV` | Path to any CSV file (no model ID required) |
+| `INPUT_CSV` | Any CSV file — raw inputs, model outputs, or any tabular data |
 | `OUTPUT_FOLDER` | Path to the folder that will be created with chunk files |
 | `--chunksize N` | Rows per chunk (default: 10000) |
 
-Chunk files are named `chunk_000.csv`, `chunk_001.csv`, … (3-digit padding for ≤999 chunks; 6-digit for larger datasets).
+The column header is preserved in every chunk. No model ID is required in the input filename. Chunk files are named `chunk_000.csv`, `chunk_001.csv`, … (3-digit padding for ≤999 chunks; 6-digit for larger datasets).
 
-**Example:**
+**Examples:**
 
 ```bash
-# Split a 50,000-row dataset into chunks of 1,000 rows
-eosframes split molecules.csv molecules_chunks/ --chunksize 1000
+# Split a large input dataset before running Ersilia models
+eosframes split compounds.csv compounds_chunks/ --chunksize 10000
+
+# Split a model output file into smaller pieces
+eosframes split eos4e40_v1.csv eos4e40_v1_chunks/ --chunksize 5000
 ```
 
 ---
@@ -297,13 +300,18 @@ logger.setLevel(logging.DEBUG)  # increase verbosity
 
 A complete workflow from raw inputs to a multi-model stacked output.
 
-### 1. Split a large input dataset
+### 1. Split a large dataset
 
 ```bash
-# Split 100,000 molecules into chunks of 10,000 for parallel model runs
+# Split input molecules into chunks for parallel model runs
 eosframes split compounds.csv compounds_chunks/ --chunksize 10000
 # → compounds_chunks/chunk_000.csv ... chunk_009.csv
+
+# Or split a model output for downstream processing
+eosframes split eos4e40_v1_full.csv eos4e40_v1_chunks/ --chunksize 5000
 ```
+
+Each chunk retains the original column headers.
 
 ### 2. Run the Ersilia models (outside eosframes)
 

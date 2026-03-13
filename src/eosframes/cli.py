@@ -32,8 +32,9 @@ def main():
 def split(input_csv: str, output_folder: str, chunksize: int) -> None:
     """Split INPUT_CSV into numbered chunk files inside OUTPUT_FOLDER.
 
-    No model ID is required in the input filename — this command is for
-    splitting arbitrary input data before running Ersilia models.
+    Works with any CSV file — raw input data, Ersilia model outputs, or
+    any other tabular file. The column header is preserved in every chunk.
+    No model ID is required in the input filename.
 
     Chunk files are named chunk_000.csv (3-digit padding) or
     chunk_000000.csv (6-digit) when more than 999 chunks are produced.
