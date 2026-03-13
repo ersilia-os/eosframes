@@ -577,6 +577,9 @@ def info(model_id: str, output: str) -> None:
     if output is None:
         output = f"{model_id}_metadata.csv"
 
+    if not output.endswith(".csv"):
+        raise click.ClickException("Output must be a .csv file.")
+
     if os.path.exists(output):
         raise click.ClickException(
             f"Output file '{output}' already exists. Remove it first."
@@ -618,6 +621,9 @@ def columns(model_id: str, version: str, output: str) -> None:
 
     if output is None:
         output = f"{model_id}_{version}_columns.csv"
+
+    if not output.endswith(".csv"):
+        raise click.ClickException("Output must be a .csv file.")
 
     if os.path.exists(output):
         raise click.ClickException(
