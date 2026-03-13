@@ -1,10 +1,7 @@
 # Manually added
-*.csv
-!data/*.csv
 *.env
 .ipynb_checkpoints
 .jupyter_ystore.db
-modred.pkl
 
 .DS_Store
 development.py
