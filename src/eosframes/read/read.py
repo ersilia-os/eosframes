@@ -106,8 +106,8 @@ def read_h5(h5_path: str) -> pd.DataFrame:
 def read_chunked_csvs(dir_path: str) -> pd.DataFrame:
     """Read a folder of chunk CSVs produced by :func:`~eosframes.split_csv`.
 
-    Files must be named ``chunk_<N>.csv`` (3- or 6-digit zero-padded
-    index) and all share the same column layout. The model ID is
+    Files must be named ``chunk_<N>.csv`` (zero-padded index) and all
+    share the same column layout. The model ID is
     extracted from the directory name.
 
     Parameters

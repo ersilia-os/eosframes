@@ -12,6 +12,7 @@ from .naming import (
     is_valid_stack_explicit_name,
     is_valid_stack_mix_name,
     is_valid_summary_name,
+    is_valid_transformer_name,
     make_chunks_dir_name,
     make_columns_name,
     make_info_name,
@@ -19,9 +20,11 @@ from .naming import (
     make_stack_explicit_name,
     make_stack_mix_name,
     make_summary_name,
+    make_transformer_name,
     parse_name,
     parse_stack_explicit_name,
     parse_stack_mix_name,
+    parse_transformer_name,
 )
 from .ops import (
     append_files,
@@ -32,7 +35,7 @@ from .ops import (
     unstack_file,
 )
 from .read.read import read_chunked_csvs, read_csv, read_h5
-from .scale import apply_scaler, fit_scaler, transform_file
+from .scale import apply_scaler, fit_file, fit_scaler, transform_file
 from .write.write import write_chunked_csvs, write_csv, write_h5, write_xlsx
 
 __all__ = [
@@ -60,6 +63,7 @@ __all__ = [
     # Scaling
     "fit_scaler",
     "apply_scaler",
+    "fit_file",
     "transform_file",
     # Naming utilities
     "parse_name",
@@ -68,10 +72,12 @@ __all__ = [
     "make_info_name",
     "make_columns_name",
     "make_summary_name",
+    "make_transformer_name",
     "make_stack_mix_name",
     "make_stack_explicit_name",
     "parse_stack_mix_name",
     "parse_stack_explicit_name",
+    "parse_transformer_name",
     "get_version_from_path",
     "get_model_id_from_path",
     "is_valid_name",
@@ -80,6 +86,7 @@ __all__ = [
     "is_valid_summary_name",
     "is_valid_stack_mix_name",
     "is_valid_stack_explicit_name",
+    "is_valid_transformer_name",
     "is_model_id_valid",
     # Misc
     "get_logger",

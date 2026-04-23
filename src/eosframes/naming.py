@@ -10,10 +10,11 @@ _MODEL_ID_RE = re.compile(r"(?<![A-Za-z0-9])eos\d[A-Za-z0-9]{3}(?![A-Za-z0-9])")
 # Matches <model_id>_<version> at the end of a stem (allows leading prefix tokens)
 _STEM_RE = re.compile(r"(?:^|_)(eos\d[A-Za-z0-9]{3})_(v\d+)$")
 
-# Matches <model_id>_<version>_info / _columns / _summary stems
+# Matches <model_id>_<version>_info / _columns / _summary / _transformer stems
 _INFO_STEM_RE = re.compile(r"(?:^|_)(eos\d[A-Za-z0-9]{3})_(v\d+)_info$")
 _COLUMNS_STEM_RE = re.compile(r"(?:^|_)(eos\d[A-Za-z0-9]{3})_(v\d+)_columns$")
 _SUMMARY_STEM_RE = re.compile(r"(?:^|_)(eos\d[A-Za-z0-9]{3})_(v\d+)_summary$")
+_TRANSFORMER_STEM_RE = re.compile(r"(?:^|_)(eos\d[A-Za-z0-9]{3})_(v\d+)_transformer$")
 
 # Stack outputs come in two flavours:
 #   Mode A (eosmix):   [prefix]_eosmix.csv — feature cols get _<model_id>_<version>
@@ -310,6 +311,70 @@ def make_summary_name(model_id: str, version: str, prefix: Optional[str] = None)
         If any argument is invalid.
     """
     return _make_sidecar_name(model_id, version, "summary", prefix)
+
+
+def parse_transformer_name(path: str) -> Optional[Dict]:
+    """Parse a transformer/scaler filename and return its components.
+
+    Transformer filenames follow ``[prefix_]<model_id>_<version>_transformer.json``.
+
+    Parameters
+    ----------
+    path : str
+        Basename or full path.
+
+    Returns
+    -------
+    dict or None
+        ``{"model_id", "version"}`` on success, ``None`` if the path does
+        not match the convention.
+    """
+    basename = os.path.basename(path.rstrip("/\\"))
+    if not basename.endswith(".json"):
+        return None
+    stem = basename[: -len(".json")]
+    m = _TRANSFORMER_STEM_RE.search(stem)
+    if m and is_model_id_valid(m.group(1)):
+        return {"model_id": m.group(1), "version": m.group(2)}
+    return None
+
+
+def is_valid_transformer_name(path: str) -> bool:
+    """Return ``True`` if *path* follows the transformer/scaler naming convention.
+
+    Matches ``[prefix_]<model_id>_<version>_transformer.json``.
+    """
+    return parse_transformer_name(path) is not None
+
+
+def make_transformer_name(
+    model_id: str, version: str, prefix: Optional[str] = None
+) -> str:
+    """Build a canonical transformer/scaler filename.
+
+    Returns
+    -------
+    str
+        e.g. ``"eos4e40_v1_transformer.json"`` or
+        ``"example_eos4e40_v1_transformer.json"``.
+
+    Raises
+    ------
+    ValueError
+        If any argument is invalid.
+    """
+    if not is_model_id_valid(model_id):
+        raise ValueError(f"Invalid model_id: {model_id!r}")
+    if not re.match(r"^v\d+$", version):
+        raise ValueError(f"Invalid version: {version!r}. Expected format: v1, v2, ...")
+    if prefix is not None and not re.fullmatch(
+        r"[A-Za-z0-9]+(?:_[A-Za-z0-9]+)*", prefix
+    ):
+        raise ValueError(
+            f"Invalid prefix: {prefix!r}. Must be alphanumeric tokens joined by underscores."
+        )
+    stem = f"{model_id}_{version}_transformer"
+    return f"{prefix}_{stem}.json" if prefix else f"{stem}.json"
 
 
 # ---------------------------------------------------------------------------

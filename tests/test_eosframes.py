@@ -24,12 +24,16 @@ from eosframes import (
     apply_scaler,
     convert_file,
     dedupe_file,
+    fit_file,
     fit_scaler,
     hstack,
     is_valid_name,
+    is_valid_transformer_name,
     make_chunks_dir_name,
     make_output_name,
+    make_transformer_name,
     parse_name,
+    parse_transformer_name,
     read_csv,
     read_h5,
     split_csv,
@@ -182,6 +186,45 @@ class TestNaming:
         assert is_valid_name(EOS4E40_CSV)
         assert is_valid_name(EOS7M30_CSV)
 
+    def test_is_valid_transformer_name_true(self):
+        for name in (
+            "eos4e40_v1_transformer.json",
+            "eos7m30_v3_transformer.json",
+            "example_eos4e40_v1_transformer.json",
+        ):
+            assert is_valid_transformer_name(name), f"expected valid: {name}"
+
+    def test_is_valid_transformer_name_false(self):
+        for name in (
+            "scaler.json",
+            "eos4e40_v1.json",
+            "eos4e40_v1_transformer.csv",
+            "eos4e40_transformer.json",
+        ):
+            assert not is_valid_transformer_name(name), f"expected invalid: {name}"
+
+    def test_parse_transformer_name(self):
+        r = parse_transformer_name("eos4e40_v1_transformer.json")
+        assert r == {"model_id": "eos4e40", "version": "v1"}
+
+    def test_parse_transformer_name_with_prefix(self):
+        r = parse_transformer_name("example_eos4e40_v1_transformer.json")
+        assert r == {"model_id": "eos4e40", "version": "v1"}
+
+    def test_parse_transformer_name_invalid_returns_none(self):
+        assert parse_transformer_name("scaler.json") is None
+
+    def test_make_transformer_name(self):
+        assert make_transformer_name("eos4e40", "v1") == "eos4e40_v1_transformer.json"
+        assert (
+            make_transformer_name("eos4e40", "v1", prefix="example")
+            == "example_eos4e40_v1_transformer.json"
+        )
+
+    def test_make_transformer_name_bad_id(self):
+        with pytest.raises(ValueError):
+            make_transformer_name("badid", "v1")
+
 
 # ===========================================================================
 # 2. Read / write
@@ -264,7 +307,7 @@ class TestSplit:
         assert n == 10  # 100 rows / 10
         files = sorted(os.listdir(out))
         assert len(files) == 10
-        assert files[0] == "chunk_000.csv"
+        assert files[0] == "chunk_0.csv"
 
     def test_split_preserves_header(self, tmp):
         out = str(tmp / "chunks")
@@ -290,17 +333,18 @@ class TestSplit:
         with pytest.raises(EosframesError, match="already exists"):
             split_csv(EOS4E40_CSV, out)
 
-    def test_split_6digit_padding(self, tmp):
-        # manufacture a file with enough rows to trigger 6-digit padding (>999 chunks)
-        # we fake it by using chunksize=1 and a 1000-row file
+    def test_split_dynamic_padding(self, tmp):
+        # 1000 chunks → indices 0..999 → 3-digit padding
         big = str(tmp / "big.csv")
         pd.DataFrame(
             {"key": range(1000), "input": range(1000), "v": range(1000)}
         ).to_csv(big, index=False)
         out = str(tmp / "chunks")
         split_csv(big, out, chunksize=1)
-        files = os.listdir(out)
-        assert all(len(f) == len("chunk_000000.csv") for f in files)
+        files = sorted(os.listdir(out))
+        assert files[0] == "chunk_000.csv"
+        assert files[-1] == "chunk_999.csv"
+        assert all(len(f) == len("chunk_000.csv") for f in files)
 
     def test_cli_split(self, tmp):
         out = str(tmp / "chunks")
@@ -655,30 +699,24 @@ class TestScalerDataFrame:
 
 
 # ===========================================================================
-# 9. Scale — transform_file (file API)
+# 9. Scale — fit_file (file API)
 # ===========================================================================
 
 
-class TestScalerFile:
-    def test_transform_creates_csv(self, tmp, df4e40):
+class TestFitFile:
+    def test_fit_file_creates_json(self, tmp, df4e40):
         src = str(tmp / "eos4e40_v1.csv")
         write_csv(df4e40, src)
-        out = transform_file(src)
-        assert os.path.exists(out)
-        assert out.endswith(".csv")
+        scaler = str(tmp / "eos4e40_v1_transformer.json")
+        fit_file(src, scaler)
+        assert os.path.exists(scaler)
 
-    def test_transform_default_output_name(self, tmp, df4e40):
+    def test_fit_file_json_keys(self, tmp, df4e40):
         src = str(tmp / "eos4e40_v1.csv")
         write_csv(df4e40, src)
-        out = transform_file(src)
-        assert out == str(tmp / "eos4e40_v1_scaled.csv")
-
-    def test_transform_save_params_creates_json(self, tmp, df4e40):
-        src = str(tmp / "eos4e40_v1.csv")
-        write_csv(df4e40, src)
-        json_path = str(tmp / "scaler.json")
-        transform_file(src, params=json_path, fit=True)
-        with open(json_path) as fh:
+        scaler = str(tmp / "eos4e40_v1_transformer.json")
+        fit_file(src, scaler)
+        with open(scaler) as fh:
             t = json.load(fh)
         assert t["model_id"] == "eos4e40"
         assert t["version"] == "v1"
@@ -687,118 +725,200 @@ class TestScalerFile:
         assert "fitted_at" in t
         assert "inhibition_50um" in t["parameters"]
 
-    def test_transform_scaled_values_correct(self, tmp, df4e40):
-        src = str(tmp / "eos4e40_v1.csv")
-        write_csv(df4e40, src)
-        out = transform_file(src)
-        scaled = pd.read_csv(out)
-        assert abs(scaled["inhibition_50um"].mean()) < 1e-6
-        assert abs(scaled["inhibition_50um"].std(ddof=0) - 1.0) < 1e-6
-
-    def test_transform_eos7m30(self, tmp, df7m30):
+    def test_fit_file_eos7m30(self, tmp, df7m30):
         src = str(tmp / "eos7m30_v1.csv")
         write_csv(df7m30, src)
-        json_path = str(tmp / "scaler.json")
-        transform_file(src, params=json_path, fit=True)
-        with open(json_path) as fh:
+        scaler = str(tmp / "eos7m30_v1_transformer.json")
+        fit_file(src, scaler)
+        with open(scaler) as fh:
             t = json.load(fh)
         assert t["model_id"] == "eos7m30"
         assert t["n_rows"] == EOS7M30_ROWS
         assert len(t["columns"]) == EOS7M30_N_FEATURES
 
-    def test_transform_existing_params_raises(self, tmp):
-        json_path = str(tmp / "scaler.json")
-        open(json_path, "w").close()
+    def test_fit_file_existing_scaler_raises(self, tmp):
+        scaler = str(tmp / "eos4e40_v1_transformer.json")
+        open(scaler, "w").close()
         with pytest.raises(EosframesError, match="already exists"):
-            transform_file(EOS4E40_CSV, params=json_path, fit=True)
+            fit_file(EOS4E40_CSV, scaler)
 
-    def test_transform_bad_naming_raises(self, tmp):
+    def test_fit_file_bad_input_naming_raises(self, tmp):
         bad = str(tmp / "output.csv")
         pd.read_csv(EOS4E40_CSV).to_csv(bad, index=False)
         with pytest.raises(EosframesError, match="naming convention"):
-            transform_file(bad)
+            fit_file(bad, str(tmp / "eos4e40_v1_transformer.json"))
 
-    def test_transform_forward_pass_produces_correct_values(self, tmp, df4e40):
+    def test_fit_file_bad_scaler_naming_raises(self, tmp, df4e40):
         src = str(tmp / "eos4e40_v1.csv")
         write_csv(df4e40, src)
-        json_path = str(tmp / "scaler.json")
-        fit_out = transform_file(src, params=json_path, fit=True)
-        applied_out = str(tmp / "applied.csv")
-        transform_file(src, output_path=applied_out, params=json_path)
-        s_fit = pd.read_csv(fit_out)["inhibition_50um"].values
-        s_applied = pd.read_csv(applied_out)["inhibition_50um"].values
-        np.testing.assert_allclose(s_fit, s_applied)
+        with pytest.raises(EosframesError, match="naming convention"):
+            fit_file(src, str(tmp / "scaler.json"))
 
-    def test_transform_forward_pass_model_id_mismatch_raises(self, tmp, df4e40, df7m30):
+    def test_fit_file_scaler_model_id_mismatch_raises(self, tmp, df4e40):
         src = str(tmp / "eos4e40_v1.csv")
         write_csv(df4e40, src)
-        json_path = str(tmp / "scaler.json")
-        transform_file(src, params=json_path, fit=True)
+        with pytest.raises(EosframesError, match="model ID"):
+            fit_file(src, str(tmp / "eos7m30_v1_transformer.json"))
+
+    def test_fit_file_scaler_version_mismatch_raises(self, tmp, df4e40):
+        src = str(tmp / "eos4e40_v1.csv")
+        write_csv(df4e40, src)
+        with pytest.raises(EosframesError, match="version"):
+            fit_file(src, str(tmp / "eos4e40_v2_transformer.json"))
+
+    def test_fit_file_fit_transform(self, tmp, df4e40):
+        src = str(tmp / "eos4e40_v1.csv")
+        write_csv(df4e40, src)
+        scaler = str(tmp / "eos4e40_v1_transformer.json")
+        out = str(tmp / "scaled.csv")
+        fit_file(src, scaler, output_path=out)
+        assert os.path.exists(scaler)
+        assert os.path.exists(out)
+        scaled = pd.read_csv(out)
+        assert abs(scaled["inhibition_50um"].mean()) < 1e-6
+
+    def test_fit_file_existing_output_raises(self, tmp, df4e40):
+        src = str(tmp / "eos4e40_v1.csv")
+        write_csv(df4e40, src)
+        scaler = str(tmp / "eos4e40_v1_transformer.json")
+        out = str(tmp / "scaled.csv")
+        open(out, "w").close()
+        with pytest.raises(EosframesError, match="already exists"):
+            fit_file(src, scaler, output_path=out)
+
+    def test_cli_fit(self, tmp, df4e40):
+        src = str(tmp / "eos4e40_v1.csv")
+        write_csv(df4e40, src)
+        scaler = str(tmp / "eos4e40_v1_transformer.json")
+        result = _runner().invoke(main, ["fit", src, "-s", scaler])
+        assert result.exit_code == 0, result.output
+        assert os.path.exists(scaler)
+        with open(scaler) as fh:
+            t = json.load(fh)
+        assert t["model_id"] == "eos4e40"
+
+    def test_cli_fit_transform(self, tmp, df4e40):
+        src = str(tmp / "eos4e40_v1.csv")
+        write_csv(df4e40, src)
+        scaler = str(tmp / "eos4e40_v1_transformer.json")
+        out = str(tmp / "scaled.csv")
+        result = _runner().invoke(main, ["fit", src, "-s", scaler, "-o", out])
+        assert result.exit_code == 0, result.output
+        assert os.path.exists(scaler)
+        assert os.path.exists(out)
+
+
+# ===========================================================================
+# 10. Scale — transform_file (file API)
+# ===========================================================================
+
+
+class TestScalerFile:
+    def test_transform_creates_csv(self, tmp, df4e40):
+        src = str(tmp / "eos4e40_v1.csv")
+        write_csv(df4e40, src)
+        scaler = str(tmp / "eos4e40_v1_transformer.json")
+        out = str(tmp / "scaled.csv")
+        fit_file(src, scaler)
+        result = transform_file(src, scaler, out)
+        assert os.path.exists(result)
+        assert result.endswith(".csv")
+
+    def test_transform_scaled_values_correct(self, tmp, df4e40):
+        src = str(tmp / "eos4e40_v1.csv")
+        write_csv(df4e40, src)
+        scaler = str(tmp / "eos4e40_v1_transformer.json")
+        out = str(tmp / "scaled.csv")
+        fit_file(src, scaler)
+        transform_file(src, scaler, out)
+        scaled = pd.read_csv(out)
+        assert abs(scaled["inhibition_50um"].mean()) < 1e-6
+        assert abs(scaled["inhibition_50um"].std(ddof=0) - 1.0) < 1e-6
+
+    def test_transform_bad_input_naming_raises(self, tmp):
+        bad = str(tmp / "output.csv")
+        pd.read_csv(EOS4E40_CSV).to_csv(bad, index=False)
+        with pytest.raises(EosframesError, match="naming convention"):
+            transform_file(
+                bad, str(tmp / "eos4e40_v1_transformer.json"), str(tmp / "out.csv")
+            )
+
+    def test_transform_bad_scaler_naming_raises(self, tmp, df4e40):
+        src = str(tmp / "eos4e40_v1.csv")
+        write_csv(df4e40, src)
+        with pytest.raises(EosframesError, match="naming convention"):
+            transform_file(src, str(tmp / "scaler.json"), str(tmp / "out.csv"))
+
+    def test_transform_missing_scaler_raises(self, tmp, df4e40):
+        src = str(tmp / "eos4e40_v1.csv")
+        write_csv(df4e40, src)
+        with pytest.raises(EosframesError, match="not found"):
+            transform_file(
+                src, str(tmp / "eos4e40_v1_transformer.json"), str(tmp / "out.csv")
+            )
+
+    def test_transform_correct_values_idempotent(self, tmp, df4e40):
+        src = str(tmp / "eos4e40_v1.csv")
+        write_csv(df4e40, src)
+        scaler = str(tmp / "eos4e40_v1_transformer.json")
+        fit_file(src, scaler)
+        out1 = str(tmp / "pass1.csv")
+        out2 = str(tmp / "pass2.csv")
+        transform_file(src, scaler, out1)
+        transform_file(src, scaler, out2)
+        v1 = pd.read_csv(out1)["inhibition_50um"].values
+        v2 = pd.read_csv(out2)["inhibition_50um"].values
+        np.testing.assert_allclose(v1, v2)
+
+    def test_transform_model_id_mismatch_raises(self, tmp, df4e40, df7m30):
+        src = str(tmp / "eos4e40_v1.csv")
+        write_csv(df4e40, src)
+        scaler = str(tmp / "eos4e40_v1_transformer.json")
+        fit_file(src, scaler)
         eos7_src = str(tmp / "eos7m30_v1.csv")
         write_csv(df7m30, eos7_src)
         with pytest.raises(EosframesError, match="Model ID mismatch"):
-            transform_file(eos7_src, output_path=str(tmp / "out.csv"), params=json_path)
+            transform_file(eos7_src, scaler, str(tmp / "out.csv"))
 
-    def test_transform_forward_pass_version_mismatch_raises(self, tmp, df4e40):
+    def test_transform_version_mismatch_raises(self, tmp, df4e40):
         src = str(tmp / "eos4e40_v1.csv")
         write_csv(df4e40, src)
-        json_path = str(tmp / "scaler.json")
-        transform_file(src, params=json_path, fit=True)
+        scaler = str(tmp / "eos4e40_v1_transformer.json")
+        fit_file(src, scaler)
         v2 = str(tmp / "eos4e40_v2.csv")
         write_csv(df4e40, v2)
         with pytest.raises(EosframesError, match="Version mismatch"):
-            transform_file(v2, output_path=str(tmp / "out.csv"), params=json_path)
+            transform_file(v2, scaler, str(tmp / "out.csv"))
 
-    def test_transform_forward_pass_column_mismatch_raises(self, tmp, df4e40, df7m30):
+    def test_transform_column_mismatch_raises(self, tmp, df4e40, df7m30):
         src = str(tmp / "eos4e40_v1.csv")
         write_csv(df4e40, src)
-        json_path = str(tmp / "scaler.json")
-        transform_file(src, params=json_path, fit=True)
+        scaler = str(tmp / "eos4e40_v1_transformer.json")
+        fit_file(src, scaler)
         df_bad = df7m30.copy()
         df_bad.model_id = "eos4e40"
         bad_named = str(tmp / "bad_eos4e40_v1.csv")
         df_bad.to_csv(bad_named, index=False)
         with pytest.raises(EosframesError, match="Column mismatch"):
-            transform_file(
-                bad_named, output_path=str(tmp / "out.csv"), params=json_path
-            )
+            transform_file(bad_named, scaler, str(tmp / "out.csv"))
 
-    def test_transform_forward_pass_output_to_h5(self, tmp, df4e40):
+    def test_transform_output_to_h5(self, tmp, df4e40):
         src = str(tmp / "eos4e40_v1.csv")
         write_csv(df4e40, src)
-        json_path = str(tmp / "scaler.json")
-        transform_file(src, params=json_path, fit=True)
+        scaler = str(tmp / "eos4e40_v1_transformer.json")
         out = str(tmp / "scaled.h5")
-        transform_file(src, output_path=out, params=json_path)
+        fit_file(src, scaler)
+        transform_file(src, scaler, out)
         assert os.path.exists(out)
         with h5py.File(out, "r") as f:
             assert "values" in f
 
-    def test_cli_transform_fit(self, tmp, df4e40):
+    def test_cli_transform(self, tmp, df4e40):
         src = str(tmp / "eos4e40_v1.csv")
         write_csv(df4e40, src)
-        json_path = str(tmp / "scaler.json")
-        out = str(tmp / "scaled.csv")
-        result = _runner().invoke(
-            main, ["transform", src, "--params", json_path, "--fit", "-o", out]
-        )
-        assert result.exit_code == 0, result.output
-        assert os.path.exists(json_path)
-        with open(json_path) as fh:
-            t = json.load(fh)
-        assert t["model_id"] == "eos4e40"
-
-    def test_cli_transform_forward_pass(self, tmp, df4e40):
-        src = str(tmp / "eos4e40_v1.csv")
-        write_csv(df4e40, src)
-        json_path = str(tmp / "scaler.json")
-        fit_out = str(tmp / "scaled_fit.csv")
-        _runner().invoke(
-            main, ["transform", src, "--params", json_path, "--fit", "-o", fit_out]
-        )
+        scaler = str(tmp / "eos4e40_v1_transformer.json")
+        _runner().invoke(main, ["fit", src, "-s", scaler])
         out = str(tmp / "scaled_apply.csv")
-        result = _runner().invoke(
-            main, ["transform", src, "--params", json_path, "-o", out]
-        )
+        result = _runner().invoke(main, ["transform", src, "-s", scaler, "-o", out])
         assert result.exit_code == 0, result.output
         assert os.path.exists(out)

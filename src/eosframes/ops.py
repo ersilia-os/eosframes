@@ -70,7 +70,7 @@ def split_csv(input_path: str, output_folder: str, chunksize: int = 10000) -> in
     df = pd.read_csv(input_path)
     total_rows = len(df)
     num_chunks = (total_rows + chunksize - 1) // chunksize
-    zfill = 6 if num_chunks >= 1000 else 3
+    zfill = len(str(max(num_chunks - 1, 0)))
     os.makedirs(output_folder)
     logger.info(
         "Splitting %d rows into %d chunks (chunksize=%d) → %s",

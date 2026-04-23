@@ -2,13 +2,13 @@
 
 # Manipulating Ersilia's dataframes
 
-`eosframes` is a Python library and CLI tool for manipulating inputs and outputs from the [Ersilia Model Hub](https://github.com/ersilia-os/ersilia). It handles splitting, assembling, converting, scaling, and summarizing tabular model outputs in CSV and HDF5 formats — all while enforcing Ersilia's file naming conventions.
+`eosframes` is a Python library and CLI tool for manipulating inputs and outputs from the [Ersilia Model Hub](https://github.com/ersilia-os/ersilia). It handles splitting, assembling, converting, scaling, and summarizing tabular model output files.
 
 ---
 
 ## Naming Convention
 
-Naming is **the** core concept in `eosframes`. Every write path (data files, chunk directories, sidecar CSVs) refuses a filename that doesn't match the convention, and every read path extracts the model ID and version directly from the filename. This eliminates whole classes of mistakes — mixing outputs from different models, scaling a `v2` file with a `v1` scaler, writing an info CSV that points to the wrong model — without relying on metadata stored inside the file.
+Naming rules must be followed. Every write path (data files, chunk directories, sidecar CSVs) refuses a filename that doesn't match the convention, and every read path extracts the model ID and version directly from the filename.
 
 ### The canonical pattern
 
@@ -18,13 +18,13 @@ Naming is **the** core concept in `eosframes`. Every write path (data files, chu
 
 | Component   | Format                                        | Required | Examples                          |
 |-------------|-----------------------------------------------|----------|-----------------------------------|
-| `prefix`    | Alphanumeric tokens joined by `_`             | Optional | `example`, `260313_gardp`         |
+| `prefix`    | Alphanumeric tokens (`_` is allowed)          | Optional | `example`, `260313_gardp`         |
 | `model_id`  | `eos` + 1 digit + 3 alphanumeric chars        | Required | `eos4e40`, `eos7m30`, `eos3804`   |
 | `version`   | `v` + integer                                 | Required | `v1`, `v2`, `v10`                 |
 | `kind`      | Sidecar tag (`info`, `columns`, `summary`)    | For sidecars only | `info`, `columns`, `summary` |
-| `ext`       | `csv` or `h5` (no `kind` allowed for `h5`)    | Required for files (omitted for chunk dirs) | `csv`, `h5` |
+| `ext`       | `csv` (or `h5`)                               | Required for files (omitted for chunk dirs) | `csv`, `h5` |
 
-The underscores (`_`) are **separators** between components, not part of the prefix. `example_eos4e40_v1.csv` parses as prefix `example`, model_id `eos4e40`, version `v1`, ext `csv` — **not** as prefix `example_` + `eos4e40_v1.csv`.
+The underscores (`_`) are separators between components. `example_eos4e40_v1.csv` parses as prefix `example`, model_id `eos4e40`, version `v1`, ext `csv`.
 
 ### File types at a glance
 
@@ -39,43 +39,15 @@ The underscores (`_`) are **separators** between components, not part of the pre
 | `[prefix]_eosmix.csv`                                   | Horizontal stack, Mode A (columns suffixed with `_<model_id>_<version>`) | `eosframes stack -o` |
 | `[prefix]_<m1>_<v1>_..._<mN>_<vN>.csv` (N≥2)            | Horizontal stack, Mode B (bare columns; every model listed in filename in input order) | `eosframes stack -o` |
 
-### Worked examples
-
-Valid:
-
-```
-eos4e40_v1.csv                       # canonical data file
-eos4e40_v1.h5                        # canonical H5 data file
-eos4e40_v1_chunks/                   # chunk directory
-example_eos4e40_v1.csv               # descriptive prefix
-260313_gardp_eos4e40_v1.csv          # date + project prefix
-eos4e40_v1_info.csv                  # info sidecar
-example_eos7m30_v1_columns.csv       # columns sidecar with prefix
-eos4e40_v1_summary.csv               # summary sidecar
-project_eosmix.csv                   # horizontal stack, Mode A
-eos4e40_v1_eos7m30_v1.csv            # horizontal stack, Mode B (2 models)
-```
-
-Invalid (the CLI will reject these and suggest a corrected filename):
-
-```
-results.csv                   # no model_id
-eos4e40.csv                   # missing version
-eos4e40_1.csv                 # version must be v-prefixed (v1, not 1)
-my_eos4e40_v1_extra.csv       # unknown trailing token (not _info, _columns, _summary)
-eos4e40_v1_info.h5            # sidecars are csv-only
-eos4e40 v1.csv                # spaces not allowed
-```
-
 ### When the convention is enforced
 
-- **Always enforced** on outputs (`convert`, `append`, `dedupe`, `info -o`, `columns -o`, `summary -o`, the Python writers). The CLI rejects invalid output paths with a message that suggests a correct filename.
-- **Enforced on inputs that need a model context** — the `info`, `columns`, `summary`, and `transform` commands parse model ID and version out of the input filename.
-- **Not enforced on `eosframes split` input** — `split` accepts any CSV since its purpose is pre-processing before a model run, and the model ID isn't known yet.
+The naming convention is always enforced. The only exception is `eosframes split INPUT`, which accepts any CSV since its purpose is pre-processing before a model run, and the model ID isn't known yet.
 
 ---
 
 ## Installation
+
+Simply run:
 
 ```bash
 pip install eosframes
@@ -129,8 +101,6 @@ eos4e40_v1.h5
 ├── features (F,)    — UTF-8 string, feature column names
 └── values   (N, F)  — float32, model output values
 ```
-
-Use `eosframes convert eos4e40_v1.h5 -o eos4e40_v1.csv` to convert to CSV, or `eosframes summary` to summarize without converting.
 
 ---
 
@@ -187,7 +157,7 @@ eosframes convert eos4e40_v1_chunks/ -o eos4e40_v1.h5
 
 ### `eosframes stack`
 
-Horizontally stack outputs from multiple Ersilia models into one CSV.
+**Horizontally** stack outputs from multiple Ersilia models into one CSV.
 
 ```bash
 eosframes stack INPUT1 INPUT2 [...] -o OUTPUT
@@ -195,7 +165,7 @@ eosframes stack INPUT1 INPUT2 [...] -o OUTPUT
 
 Pass each input file as a positional argument, space-separated. All input files must contain the **same molecules in the same order**. The `key` and `input` columns are kept only once.
 
-Model provenance never gets lost: the **output filename selects one of two naming modes**, and each mode preserves provenance in a different place.
+Model provenance never gets lost. The output filename selects one of two naming modes, and each mode preserves provenance in a different place.
 
 **Mode A — `[prefix]_eosmix.csv`**
 
@@ -206,7 +176,7 @@ eosframes stack example_eos4e40_v1.csv example_eos7m30_v1.csv -o project_eosmix.
 # → columns: key, input, inhibition_50um_eos4e40_v1, molecular_weight_eos7m30_v1, logp_eos7m30_v1, ...
 ```
 
-**Mode B — `[prefix]_<m1>_<v1>_..._<mN>_<vN>.csv`**
+**Mode B — `[prefix]_<model_id>_<version>_..._<model_id>_<version>.csv`**
 
 Every stacked `(model_id, version)` appears in the filename, in the same order as the positional inputs. Feature columns stay bare.
 
@@ -215,7 +185,7 @@ eosframes stack example_eos4e40_v1.csv example_eos7m30_v1.csv -o eos4e40_v1_eos7
 # → columns: key, input, inhibition_50um, molecular_weight, logp, ...
 ```
 
-No other output name is accepted — the CLI rejects anything else and suggests a valid filename for each mode. Duplicate `(model_id, version)` pairs across inputs are always rejected (column collisions in Mode A; ambiguous filenames in Mode B). Two versions of the same model (e.g. `eos4e40_v1` + `eos4e40_v2`) *are* allowed.
+No other output name is accepted. Duplicate `(model_id, version)` pairs across inputs are always rejected (column collisions in Mode A; ambiguous filenames in Mode B). Two versions of the same model (e.g. `eos4e40_v1` + `eos4e40_v2`) *are* allowed.
 
 ---
 
@@ -300,25 +270,6 @@ eosframes summary example_eos7m30_v1.csv
 eosframes summary example_eos7m30_v1.csv -o example_eos7m30_v1_summary.csv
 ```
 
-```
-──────────────────── example_eos7m30_v1.csv ────────────────────
-  Model ID:      eos7m30
-  Version:       v1
-  Format:        CSV
-  Size:          95.3 KB
-  Columns:       51 (2 meta + 49 features)
-  Rows:          100
-  Unique keys:   100
-  Duplicates:    no
-  Missing data:  no
-
- column                          dtype    missing     min    mean     max
- molecular_weight               float64        0    198.2   373.8   594.1
- logp                           float64        0     0.61    3.57    6.66
- hydrogen_bond_acceptors        float64        0      1.0    5.12    13.0
- ...
-```
-
 ---
 
 ### `eosframes info`
@@ -365,205 +316,32 @@ eosframes columns data/example_eos4e40_v1.csv -o example_eos4e40_v1_columns.csv
 
 ---
 
+### `eosframes fit`
+
+```bash
+eosframes fit INPUT_FILE -s TRANSFORMER_FILE
+```
+
+Fits a standard transformer on the numeric feature columns of `INPUT_FILE` and saves
+the parameters to `TRANSFORMER_FILE`. The transformer file must follow the naming convention
+`[prefix_]<model_id>_<version>_transformer.json` and its model ID / version must
+match the input file. Columns with more than 25 % missing values are skipped.
+
+```bash
+eosframes fit eos7m30_v1.csv -s eos7m30_v1_transformer.json
+```
+
 ### `eosframes transform`
 
-Scale the numeric feature columns of an Ersilia output file. Three modes depending on `--params` and `--fit`:
+```bash
+eosframes transform INPUT_FILE -s TRANSFORMER_FILE -o OUTPUT_FILE
+```
+
+Applies a saved transformer to `INPUT_FILE`. `TRANSFORMER_FILE` must be a JSON file produced
+by `eosframes fit`. The output defaults to `<input_stem>_scaled.<ext>`.
 
 ```bash
-eosframes transform INPUT_FILE [-o OUTPUT] [--params JSON] [--fit] [--method standard]
-```
-
-| Flags                  | Behaviour                                              |
-|------------------------|--------------------------------------------------------|
-| *(none)*               | Fit on the input, discard parameters                   |
-| `--params FILE --fit`  | Fit on the input, save parameters to `FILE`            |
-| `--params FILE`        | Load parameters from `FILE`, apply (forward pass)      |
-
-```bash
-# Fit a scaler on the eos7m30 ADMET outputs (49 features), discard params
-eosframes transform example_eos7m30_v1.csv
-
-# Fit and save parameters for later reuse
-eosframes transform example_eos7m30_v1.csv --params eos7m30_v1_scaler.json --fit
-
-# Apply saved parameters to new compounds (forward pass)
-eosframes transform new_eos7m30_v1.csv --params eos7m30_v1_scaler.json -o new_eos7m30_v1_scaled.csv
-```
-
-The saved JSON file contains:
-
-```json
-{
-  "model_id": "eos7m30",
-  "version": "v1",
-  "n_rows": 100,
-  "fitted_at": "2026-03-13T10:00:00",
-  "method": "standard",
-  "columns": ["molecular_weight", "logp", ...],
-  "skipped_columns": [],
-  "parameters": {
-    "molecular_weight": {"mean": 373.8, "std": 82.4},
-    "logp": {"mean": 3.57, "std": 1.21},
-    ...
-  }
-}
-```
-
-Columns with more than 25% missing values are skipped and listed in `skipped_columns`. The output defaults to `<input_stem>_scaled.<ext>` when `-o` is not provided.
-
----
-
-## Python API
-
-All CLI operations are also available as Python functions.
-
-### Reading and writing
-
-```python
-import numpy as np
-from eosframes import read_csv, read_h5, write_csv, write_h5
-
-# Read (model_id is extracted from the filename automatically)
-df = read_csv("example_eos4e40_v1.csv")
-print(df.model_id)      # "eos4e40"
-print(df.shape)         # (100, 3)  — key, input, inhibition_50um
-
-df = read_h5("eos7m30_v1.h5")
-print(df.shape)         # (100, 51) — key, input, 49 ADMET features
-
-# Write
-write_csv(df, "eos4e40_v1.csv")
-write_h5(df, "eos4e40_v1.h5", dtype=np.float32)
-```
-
-### Stacking
-
-```python
-from eosframes import hstack, vstack, read_csv
-
-df4e40 = read_csv("example_eos4e40_v1.csv")
-df7m30 = read_csv("example_eos7m30_v1.csv")
-
-# Horizontal: combine features from two models (same 100 molecules).
-# `mode` is required and matches the two CLI naming conventions.
-mix = hstack([df4e40, df7m30], mode="eosmix")
-# columns: key, input, inhibition_50um_eos4e40_v1, molecular_weight_eos7m30_v1, ...
-
-explicit = hstack([df4e40, df7m30], mode="explicit")
-# columns: key, input, inhibition_50um, molecular_weight, ...
-# (provenance lives in the filename you save this DataFrame to)
-
-# Vertical: concatenate rows from the same model
-batch1 = read_csv("eos4e40_v1_batch1.csv")
-batch2 = read_csv("eos4e40_v1_batch2.csv")
-all_rows = vstack([batch1, batch2])
-```
-
-### File operations
-
-```python
-from eosframes import (
-    split_csv,
-    convert_file,
-    stack_files,
-    unstack_file,
-    append_files,
-    dedupe_file,
-)
-
-# Split
-n_chunks = split_csv("compounds.csv", "compounds_chunks/", chunksize=10000)
-
-# Convert
-convert_file("example_eos4e40_v1.csv", "eos4e40_v1.h5")
-
-# Stack files
-stack_files(
-    ["example_eos4e40_v1.csv", "example_eos7m30_v1.csv"],
-    "project_eosmix.csv",   # or e.g. "eos4e40_v1_eos7m30_v1.csv" for Mode B
-)
-
-# Unstack (inverse of stack). Mode is detected from the input filename.
-# Output folder must not exist — unstack creates it.
-written = unstack_file("project_eosmix.csv", "./split/")
-# → ["./split/project_eos4e40_v1.csv", "./split/project_eos7m30_v1.csv"]
-
-# Append
-append_files(["eos4e40_v1_batch1.csv", "eos4e40_v1_batch2.csv"], "eos4e40_v1.csv")
-
-# Deduplicate — returns (rows_before, rows_after)
-before, after = dedupe_file("eos4e40_v1_raw.csv", "eos4e40_v1.csv")
-```
-
-### Scaling
-
-```python
-from eosframes import fit_scaler, apply_scaler, transform_file
-import pandas as pd
-
-# DataFrame API
-df = pd.read_csv("example_eos7m30_v1.csv")
-params = fit_scaler(df)           # dict with method, columns, parameters
-scaled = apply_scaler(df, params)
-
-# File API (with model_id/version cross-validation)
-transform_file("example_eos7m30_v1.csv", params="eos7m30_v1_scaler.json", fit=True)
-transform_file("new_eos7m30_v1.csv", params="eos7m30_v1_scaler.json", output_path="new_eos7m30_v1_scaled.csv")
-```
-
-### Hub data
-
-```python
-from eosframes import fetch_metadata, fetch_columns
-
-# Low-level fetchers — take a model_id (and version) directly.
-# The CLI `info` / `columns` commands wrap these and resolve the identifiers
-# from a filename for you.
-metadata = fetch_metadata("eos4e40")
-print(metadata["task"])          # "Classification"
-
-columns_df = fetch_columns("eos7m30", "v1")
-print(columns_df.head())
-```
-
-### Naming utilities
-
-```python
-from eosframes import (
-    parse_name,
-    make_output_name,
-    make_info_name,
-    make_columns_name,
-    make_summary_name,
-    is_valid_name,
-    is_valid_info_name,
-    is_valid_columns_name,
-    is_valid_summary_name,
-    get_version_from_path,
-)
-
-parse_name("example_eos4e40_v1.csv")
-# → {"model_id": "eos4e40", "version": "v1", "extension": "csv", "name_type": "csv"}
-
-parse_name("260313_gardp_eos7m30_v2.h5")
-# → {"model_id": "eos7m30", "version": "v2", "extension": "h5", "name_type": "h5"}
-
-parse_name("example_eos4e40_v1_info.csv")
-# → {"model_id": "eos4e40", "version": "v1", "extension": "csv", "name_type": "info"}
-
-parse_name("output.csv")   # → None (no model_id found)
-
-make_output_name("eos4e40", "v1", "csv")            # → "eos4e40_v1.csv"
-make_info_name("eos4e40", "v1")                     # → "eos4e40_v1_info.csv"
-make_columns_name("eos4e40", "v1", prefix="example")# → "example_eos4e40_v1_columns.csv"
-make_summary_name("eos4e40", "v1")                  # → "eos4e40_v1_summary.csv"
-
-is_valid_name("example_eos4e40_v1.csv")       # True  (data file)
-is_valid_name("eos4e40_v1_info.csv")          # False (sidecar — use is_valid_info_name)
-is_valid_info_name("example_eos4e40_v1_info.csv")     # True
-is_valid_columns_name("eos4e40_v1_columns.csv")       # True
-
-get_version_from_path("eos7m30_v2.h5")   # "v2"
+eosframes transform new_eos7m30_v1.csv -s eos7m30_v1_transformer.json -o new_eos7m30_v1_scaled.csv
 ```
 
 ---
@@ -591,11 +369,11 @@ eosframes dedupe eos7m30_v1.csv -o eos7m30_v1_clean.csv
 # 5. Summarize
 eosframes summary eos7m30_v1_clean.csv
 
-# 6. Fit a scaler on the training set and save parameters
-eosframes transform eos7m30_v1_clean.csv --params eos7m30_v1_scaler.json --fit
+# 6. Fit a transformer on the training set and save parameters
+eosframes fit eos7m30_v1_clean.csv -s eos7m30_v1_transformer.json
 
-# 7. Apply scaler to new data (forward pass)
-eosframes transform new_eos7m30_v1.csv --params eos7m30_v1_scaler.json -o new_eos7m30_v1_scaled.csv
+# 7. Apply transformer to new data
+eosframes transform new_eos7m30_v1.csv -s eos7m30_v1_transformer.json -o new_eos7m30_v1_scaled.csv
 
 # 8. Stack both model outputs side by side (Mode A — columns carry provenance)
 eosframes stack eos4e40_v1_clean.csv eos7m30_v1_clean.csv -o combined_eosmix.csv
@@ -603,6 +381,48 @@ eosframes stack eos4e40_v1_clean.csv eos7m30_v1_clean.csv -o combined_eosmix.csv
 # 8b. Or equivalently Mode B (filename carries provenance; columns stay bare)
 eosframes stack eos4e40_v1_clean.csv eos7m30_v1_clean.csv -o eos4e40_v1_eos7m30_v1.csv
 ```
+
+## Python API
+
+Every CLI command has a Python counterpart. Import from `eosframes` directly:
+
+```python
+from eosframes import (
+    split_csv, convert_file,
+    append_files, dedupe_file,
+    stack_files, unstack_file,
+    fit_file, transform_file,
+    hstack, vstack,
+)
+```
+
+### File-level operations
+
+| Function | CLI equivalent | Notes |
+|---|---|---|
+| `split_csv(input, output_folder, chunksize=10000)` | `split` | Returns number of chunks written |
+| `convert_file(input_path, output_path)` | `convert` | CSV↔H5, CSV↔chunks, H5↔chunks |
+| `append_files(*input_paths, output_path)` | `append` | Vertically stack same-model files |
+| `dedupe_file(input_path, output_path)` | `dedupe` | Deduplicate by `key` column |
+| `stack_files(*input_paths, output_path)` | `stack` | Horizontally stack multiple models |
+| `unstack_file(input_path, output_folder)` | `unstack` | Split a stacked file back per model |
+| `fit_file(input_path, scaler_path, output_path=None)` | `fit` | Fit scaler; pass `output_path` for fit-transform |
+| `transform_file(input_path, scaler_path, output_path)` | `transform` | Apply saved scaler |
+
+### DataFrame-level operations
+
+For working directly with in-memory DataFrames (all require `df.model_id` to be set):
+
+| Function | What it does |
+|---|---|
+| `hstack(df1, df2, …)` | Horizontal stack — mirrors `stack_files` |
+| `vstack(df1, df2, …)` | Vertical stack — mirrors `append_files` |
+| `fit_scaler(df)` | Fit and return scaler params dict |
+| `apply_scaler(df, params)` | Apply params dict to DataFrame |
+
+### Error handling
+
+All violations of the naming convention, model ID mismatches, or attempts to overwrite existing files raise `EosframesError`.
 
 ---
 

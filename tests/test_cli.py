@@ -431,18 +431,16 @@ class TestSplit:
         assert result.exit_code == 0, result.output
         files = sorted(os.listdir(out))
         assert len(files) == 4  # ceil(10/3) = 4
-        assert files[0] == "chunk_000.csv"
+        assert files[0] == "chunk_0.csv"
 
-    def test_zfill_3_digit(self, tmp):
+    def test_zfill_dynamic(self, tmp):
         src = str(tmp / "input.csv")
         _write_csv(src, n_rows=5)
         out = str(tmp / "chunks")
         CliRunner().invoke(main, ["split", src, "-o", out, "--chunksize", "1"])
-        files = os.listdir(out)
-        # 5 chunks → 3-digit padding
-        assert all(
-            f.startswith("chunk_") and len(f) == 13 for f in files
-        )  # chunk_000.csv
+        files = sorted(os.listdir(out))
+        # 5 chunks → indices 0..4 → 1-digit padding
+        assert files == [f"chunk_{i}.csv" for i in range(5)]
 
     def test_output_folder_exists_error(self, tmp):
         src = str(tmp / "input.csv")

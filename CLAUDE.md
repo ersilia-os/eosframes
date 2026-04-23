@@ -49,7 +49,7 @@ When editing or adding I/O paths, preserve this contract: after any transformati
 cli.py             # Thin Click wrappers. Translates EosframesError → ClickException.
 ops.py             # File-level operations: split, convert, stack, append, dedupe.
                    # Handles read→validate→write flow and delegates to read/write modules.
-scale.py           # Standard scaler + transform_file (3-mode fit/apply file API).
+scale.py           # Standard scaler: fit_file saves a scaler JSON, transform_file applies it.
 hub.py             # Fetches metadata.json / run_columns.csv from github.com/ersilia-os/<model_id>.
                    # Version "v1" resolves to git tag "v1.0.0" with fallback to "main".
 read/read.py       # CSV / H5 / chunked-CSV readers.
@@ -82,14 +82,13 @@ Every write path (CSV, H5, chunks dir, scaler JSON) refuses to overwrite existin
 
 Static reference data lives in `data/` (`example_eos4e40_v1.csv`, `example_eos7m30_v1.csv`) and is intentionally committed (see `.gitignore` — `*.csv` is not globally excluded). `tests/test_eosframes.py` uses these as fixtures (`df4e40`, `df7m30`). Tests that write files use pytest `tmp_path`.
 
-### Scaling — three modes of `transform_file`
+### Scaling — `fit_file` + `transform_file`
 
-Controlled by the `params` path and `fit` flag (mirrored in the `transform` CLI):
+Two separate file-level functions (mirrored by `eosframes fit` and `eosframes transform`):
 
-| `params`    | `fit`  | Behaviour                                                     |
-|-------------|--------|---------------------------------------------------------------|
-| `None`      | —      | Fit on input, apply, discard parameters.                      |
-| `path`      | `True` | Fit on input, save parameters to `path` (must not exist), apply. |
-| `path`      | `False`| Load parameters from `path`, apply (forward pass).            |
+| Function         | Behaviour                                                          |
+|------------------|--------------------------------------------------------------------|
+| `fit_file(input, scaler)` | Fit on `input`, save parameters to `scaler` (must not exist). |
+| `transform_file(input, scaler)` | Load parameters from `scaler`, apply to `input`.      |
 
-Forward pass cross-validates `model_id` and `version` between the saved JSON and the input file. Columns with >25 % missing values are auto-skipped during fitting and recorded in `skipped_columns`.
+Scaler files must follow `[prefix_]<model_id>_<version>_transformer.json`. `fit_file` cross-validates the model ID and version encoded in the scaler filename against the input file before writing. `transform_file` cross-validates from the JSON contents. Columns with >25 % missing values are auto-skipped during fitting and recorded in `skipped_columns`.

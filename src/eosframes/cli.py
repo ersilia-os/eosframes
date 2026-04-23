@@ -144,8 +144,8 @@ def split(input_csv: str, output_folder: str, chunksize: int) -> None:
     any other tabular file. The column header is preserved in every chunk.
     No model ID is required in the input filename.
 
-    Chunk files are named chunk_000.csv (3-digit padding) or
-    chunk_000000.csv (6-digit) when more than 999 chunks are produced.
+    Chunk files are named chunk_<N>.csv with zero-padding sized to fit the
+    total chunk count (e.g. chunk_0.csv for 1–9, chunk_00.csv for 10–99).
     """
     try:
         ops.split_csv(input_csv, output_folder, chunksize)
@@ -640,68 +640,71 @@ def columns(input_file: str, output: str) -> None:
         click.echo(resolved_out)
 
 
-@main.command(short_help="Scale the numeric feature columns.")
+@main.command(short_help="Fit a scaler and save parameters to a JSON file.")
 @click.argument("input_file", type=click.Path(exists=True, dir_okay=False))
+@click.option(
+    "--scaler",
+    "-s",
+    required=True,
+    type=click.Path(),
+    help="Path where the scaler JSON file will be saved.",
+)
 @click.option(
     "--output",
     "-o",
     default=None,
     type=click.Path(),
-    help="Output file path. Defaults to <input_stem>_scaled.<ext>.",
+    help="If provided, also write the scaled data here (fit-transform).",
 )
-@click.option(
-    "--params",
-    default=None,
-    type=click.Path(),
-    help="JSON file for transform parameters. With --fit: save fitted params here. Without --fit: load params from here (forward pass).",
-)
-@click.option(
-    "--fit",
-    is_flag=True,
-    default=False,
-    help="Fit a new scaler and save parameters to --params. Requires --params.",
-)
-@click.option(
-    "--method",
-    default="standard",
-    show_default=True,
-    type=click.Choice(_scale.SUPPORTED_METHODS),
-    help="Scaling method. Ignored in forward-pass mode.",
-)
-def transform(
-    input_file: str, output: str, params: str, fit: bool, method: str
-) -> None:
-    """Scale the numeric feature columns of the input.
+def fit(input_file: str, scaler: str, output: str) -> None:
+    """Fit a scaler on INPUT_FILE and save parameters to SCALER.
 
-    Three modes depending on --params and --fit:
+    Only numeric feature columns are fitted. Columns with more than 25 %
+    missing values are skipped. The key and input columns are ignored.
 
-    \b
-      No --params          fit on the input, discard parameters.
-      --params FILE --fit  fit on the input, save parameters to FILE.
-      --params FILE        load parameters from FILE, apply (forward pass).
-
-    Only numeric feature columns are scaled. Columns with more than 25 %
-    missing values are skipped. The key and input columns pass through
-    unchanged.
+    When -o is given the scaled output is also written immediately (fit-transform).
 
     \b
     Examples:
-      eosframes transform eos4e40_v1.csv
-      eosframes transform eos4e40_v1.csv --params scaler.json --fit
-      eosframes transform new_eos4e40_v1.csv --params scaler.json -o scaled.csv
+      eosframes fit eos4e40_v1.csv -s eos4e40_v1_transformer.json
+      eosframes fit eos4e40_v1.csv -s eos4e40_v1_transformer.json -o eos4e40_v1_scaled.csv
     """
-    if fit and params is None:
-        raise click.UsageError(
-            "--fit requires --params to specify where to save the parameters."
-        )
     try:
-        out = _scale.transform_file(
-            input_file,
-            output_path=output,
-            params=params,
-            fit=fit,
-            method=method,
-        )
+        _scale.fit_file(input_file, scaler, output_path=output)
+    except EosframesError as e:
+        raise _err(e) from e
+    click.echo(output if output is not None else scaler)
+
+
+@main.command(short_help="Apply a saved scaler to scale numeric feature columns.")
+@click.argument("input_file", type=click.Path(exists=True, dir_okay=False))
+@click.option(
+    "--scaler",
+    "-s",
+    required=True,
+    type=click.Path(exists=True),
+    help="Scaler JSON file produced by `eosframes fit`.",
+)
+@click.option(
+    "--output",
+    "-o",
+    required=True,
+    type=click.Path(),
+    help="Output file path.",
+)
+def transform(input_file: str, scaler: str, output: str) -> None:
+    """Apply a saved scaler to INPUT_FILE and write scaled data to OUTPUT.
+
+    Loads the scaler parameters from SCALER and applies them to the numeric
+    feature columns of INPUT_FILE. The key and input columns pass through
+    unchanged.
+
+    \b
+    Example:
+      eosframes transform new_eos4e40_v1.csv -s eos4e40_v1_transformer.json -o scaled.csv
+    """
+    try:
+        out = _scale.transform_file(input_file, scaler, output)
     except EosframesError as e:
         raise _err(e) from e
     click.echo(out)

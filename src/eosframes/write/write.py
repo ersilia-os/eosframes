@@ -180,9 +180,13 @@ def write_chunked_csvs(df: pd.DataFrame, dir_path: str, chunksize: int) -> None:
             f"Directory '{dir_path}' already exists. Remove it before saving."
         )
     os.mkdir(dir_path)
+    num_chunks = (len(df) + chunksize - 1) // chunksize
+    zfill = len(str(max(num_chunks - 1, 0)))
     logger.info("Writing %d rows to %s in chunks of %d", len(df), dir_path, chunksize)
     for i, chunk in enumerate(chunker(df.reset_index(drop=True), chunksize)):
-        chunk.to_csv(os.path.join(dir_path, f"chunk_{i:06d}.csv"), index=False)
+        chunk.to_csv(
+            os.path.join(dir_path, f"chunk_{str(i).zfill(zfill)}.csv"), index=False
+        )
     logger.info("Done: %s", dir_path)
 
 
