@@ -35,7 +35,7 @@ from .ops import (
     unstack_file,
 )
 from .read.read import read_chunked_csvs, read_csv, read_h5
-from .scale import apply_scaler, fit_file, fit_scaler, transform_file
+from .scale import fit, fit_file, transform, transform_file
 from .write.write import write_chunked_csvs, write_csv, write_h5, write_xlsx
 
 __all__ = [
@@ -61,8 +61,8 @@ __all__ = [
     "fetch_metadata",
     "fetch_columns",
     # Scaling
-    "fit_scaler",
-    "apply_scaler",
+    "fit",
+    "transform",
     "fit_file",
     "transform_file",
     # Naming utilities

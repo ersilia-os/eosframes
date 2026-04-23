@@ -417,8 +417,8 @@ For working directly with in-memory DataFrames (all require `df.model_id` to be 
 |---|---|
 | `hstack(df1, df2, …)` | Horizontal stack — mirrors `stack_files` |
 | `vstack(df1, df2, …)` | Vertical stack — mirrors `append_files` |
-| `fit_scaler(df)` | Fit and return scaler params dict |
-| `apply_scaler(df, params)` | Apply params dict to DataFrame |
+| `fit(df)` | Fit and return scaler params dict |
+| `transform(df, params)` | Apply params dict to DataFrame |
 
 ### Error handling
 

@@ -32,7 +32,7 @@ SUPPORTED_METHODS = ("standard",)
 # ---------------------------------------------------------------------------
 
 
-def fit_scaler(df: pd.DataFrame, method: str = "standard") -> dict:
+def fit(df: pd.DataFrame, method: str = "standard") -> dict:
     """Fit a scaler on the numeric feature columns of a DataFrame.
 
     Non-numeric columns and columns with more than 25 % missing values are
@@ -95,7 +95,7 @@ def fit_scaler(df: pd.DataFrame, method: str = "standard") -> dict:
     }
 
 
-def apply_scaler(df: pd.DataFrame, params: dict) -> pd.DataFrame:
+def transform(df: pd.DataFrame, params: dict) -> pd.DataFrame:
     """Apply scaler parameters to a DataFrame.
 
     ``key``, ``input``, and any columns not in ``params["columns"]`` pass
@@ -106,7 +106,7 @@ def apply_scaler(df: pd.DataFrame, params: dict) -> pd.DataFrame:
     ----------
     df : pd.DataFrame
     params : dict
-        As returned by :func:`fit_scaler` (or loaded from the JSON file).
+        As returned by :func:`fit` (or loaded from the JSON file).
 
     Returns
     -------
@@ -245,7 +245,7 @@ def fit_file(
     df = _read_file(input_path)
 
     logger.info("Fitting scaler on %d rows from %s", len(df), input_path)
-    fitted = fit_scaler(df)
+    fitted = fit(df)
 
     transformer = {
         "model_id": parsed["model_id"],
@@ -259,7 +259,7 @@ def fit_file(
     logger.info("Scaler saved to %s", scaler_path)
 
     if output_path is not None:
-        scaled_df = apply_scaler(df, fitted)
+        scaled_df = transform(df, fitted)
         _write_df(scaled_df, output_path)
         logger.info("Scaled output written to %s", output_path)
 
@@ -341,7 +341,7 @@ def transform_file(
     df = _read_file(input_path)
 
     logger.info("Applying scaler to %d rows from %s", len(df), input_path)
-    scaled_df = apply_scaler(df, transformer)
+    scaled_df = transform(df, transformer)
 
     _write_df(scaled_df, output_path)
     logger.info("Scaled output written to %s", output_path)

@@ -21,11 +21,10 @@ from click.testing import CliRunner
 from eosframes import (
     EosframesError,
     append_files,
-    apply_scaler,
     convert_file,
     dedupe_file,
+    fit,
     fit_file,
-    fit_scaler,
     hstack,
     is_valid_name,
     is_valid_transformer_name,
@@ -38,6 +37,7 @@ from eosframes import (
     read_h5,
     split_csv,
     stack_files,
+    transform,
     transform_file,
     vstack,
     write_csv,
@@ -616,13 +616,13 @@ class TestDedupe:
 
 
 # ===========================================================================
-# 8. Scale — fit_scaler / apply_scaler (DataFrame API)
+# 8. Scale — fit / transform (DataFrame API)
 # ===========================================================================
 
 
 class TestScalerDataFrame:
-    def test_fit_scaler_returns_correct_keys(self, df4e40):
-        params = fit_scaler(df4e40)
+    def test_fit_returns_correct_keys(self, df4e40):
+        params = fit(df4e40)
         assert set(params.keys()) == {
             "method",
             "columns",
@@ -633,43 +633,43 @@ class TestScalerDataFrame:
         assert params["columns"] == EOS4E40_FEATURES
         assert params["skipped_columns"] == []
 
-    def test_fit_scaler_mean_std(self, df4e40):
-        params = fit_scaler(df4e40)
+    def test_fit_mean_std(self, df4e40):
+        params = fit(df4e40)
         p = params["parameters"]["inhibition_50um"]
         expected_mean = float(df4e40["inhibition_50um"].mean())
         expected_std = float(df4e40["inhibition_50um"].std(ddof=0))
         assert abs(p["mean"] - expected_mean) < 1e-6
         assert abs(p["std"] - expected_std) < 1e-6
 
-    def test_apply_scaler_zero_mean(self, df4e40):
-        params = fit_scaler(df4e40)
-        scaled = apply_scaler(df4e40, params)
+    def test_transform_zero_mean(self, df4e40):
+        params = fit(df4e40)
+        scaled = transform(df4e40, params)
         assert abs(scaled["inhibition_50um"].mean()) < 1e-6
 
-    def test_apply_scaler_unit_std(self, df4e40):
-        params = fit_scaler(df4e40)
-        scaled = apply_scaler(df4e40, params)
+    def test_transform_unit_std(self, df4e40):
+        params = fit(df4e40)
+        scaled = transform(df4e40, params)
         assert abs(scaled["inhibition_50um"].std(ddof=0) - 1.0) < 1e-6
 
-    def test_apply_scaler_preserves_key_input(self, df4e40):
-        params = fit_scaler(df4e40)
-        scaled = apply_scaler(df4e40, params)
+    def test_transform_preserves_key_input(self, df4e40):
+        params = fit(df4e40)
+        scaled = transform(df4e40, params)
         pd.testing.assert_series_equal(df4e40["key"], scaled["key"])
         pd.testing.assert_series_equal(df4e40["input"], scaled["input"])
 
-    def test_apply_scaler_many_features(self, df7m30):
-        params = fit_scaler(df7m30)
-        scaled = apply_scaler(df7m30, params)
+    def test_transform_many_features(self, df7m30):
+        params = fit(df7m30)
+        scaled = transform(df7m30, params)
         # all fitted columns should be roughly zero-mean
         for col in params["columns"]:
             assert abs(scaled[col].mean()) < 1e-4, f"{col} mean not near 0"
 
-    def test_apply_scaler_column_mismatch_raises(self, df4e40, df7m30):
-        params = fit_scaler(df4e40)
+    def test_transform_column_mismatch_raises(self, df4e40, df7m30):
+        params = fit(df4e40)
         with pytest.raises(EosframesError, match="Column mismatch"):
-            apply_scaler(df7m30, params)
+            transform(df7m30, params)
 
-    def test_fit_scaler_skips_mostly_missing(self):
+    def test_fit_skips_mostly_missing(self):
         df = pd.DataFrame(
             {
                 "key": ["k0", "k1", "k2", "k3"],
@@ -679,11 +679,11 @@ class TestScalerDataFrame:
             }
         )
         df.model_id = "eos4e40"
-        params = fit_scaler(df)
+        params = fit(df)
         assert "bad" in params["skipped_columns"]
         assert "good" in params["columns"]
 
-    def test_fit_scaler_constant_column(self):
+    def test_fit_constant_column(self):
         df = pd.DataFrame(
             {
                 "key": ["k0", "k1"],
@@ -692,8 +692,8 @@ class TestScalerDataFrame:
             }
         )
         df.model_id = "eos4e40"
-        params = fit_scaler(df)
-        scaled = apply_scaler(df, params)
+        params = fit(df)
+        scaled = transform(df, params)
         # constant column → std=0 → all zeros after scaling
         assert (scaled["flat"] == 0.0).all()
 
