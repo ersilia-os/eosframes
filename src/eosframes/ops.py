@@ -1,14 +1,27 @@
 """File-level operations for splitting, converting, stacking, appending, and deduplicating."""
 
 import os
-from typing import List, Tuple
+import re
+from typing import Dict, List, Tuple
 
 import numpy as np
 import pandas as pd
 
+from . import hub
 from .exceptions import EosframesError
 from .logger import get_logger
-from .naming import is_valid_name, parse_name
+from .manipulate.stack import hstack
+from .naming import (
+    is_model_id_valid,
+    is_valid_name,
+    is_valid_stack_explicit_name,
+    is_valid_stack_mix_name,
+    make_stack_explicit_name,
+    make_stack_mix_name,
+    parse_name,
+    parse_stack_explicit_name,
+    parse_stack_mix_name,
+)
 from .read.read import read_csv, read_h5
 from .utils.utils import chunker
 from .write.write import write_csv, write_h5
@@ -142,25 +155,33 @@ def convert_file(input_path: str, output_path: str) -> None:
     logger.info("Done: %s", output_path)
 
 
-def stack_files(input_paths: List[str], output_path: str, suffix: bool = True) -> None:
+def stack_files(input_paths: List[str], output_path: str) -> None:
     """Horizontally stack outputs from multiple Ersilia models into one CSV.
 
-    All input files must contain the same inputs in the same order. Each
-    model ID may appear only once.
+    The *output filename* selects the naming mode:
+
+    * **Mode A (eosmix)** — ``[prefix]_eosmix.csv``. Feature columns get
+      suffixed with ``_<model_id>_<version>``. The mixture filename does
+      not embed the model list.
+    * **Mode B (explicit)** — ``[prefix]_<m1>_<v1>_..._<mN>_<vN>.csv``.
+      Feature columns stay bare. The filename must list every stacked
+      ``(model_id, version)`` in the same order as ``input_paths``.
+
+    All input files must follow the Ersilia naming convention and contain
+    the same rows in the same order.
 
     Parameters
     ----------
     input_paths : list of str
         Two or more CSV or H5 files, each following the naming convention.
     output_path : str
-        Output CSV path (no naming convention required).
-    suffix : bool
-        If True (default), append ``.model_id`` to feature column names.
+        Output CSV path. Must follow either Mode A or Mode B above.
 
     Raises
     ------
     EosframesError
-        On duplicate models, input mismatch, or invalid naming.
+        On naming violations, duplicate ``(model_id, version)`` pairs,
+        Mode B order mismatch, or input mismatch.
     """
     logger = get_logger()
     if len(input_paths) < 2:
@@ -169,53 +190,64 @@ def stack_files(input_paths: List[str], output_path: str, suffix: bool = True) -
         raise EosframesError(
             f"Output file '{output_path}' already exists. Remove it first."
         )
-    if not output_path.endswith(".csv"):
-        raise EosframesError("Output must be a .csv file.")
 
     dfs = []
-    seen_model_ids: List[str] = []
+    input_pairs: List[Tuple[str, str]] = []  # (model_id, version) per input
     for path in input_paths:
-        if not is_valid_name(path):
+        parsed = parse_name(path)
+        if parsed is None or parsed["name_type"] not in {"csv", "h5"}:
             raise EosframesError(
                 f"'{path}' does not follow the naming convention. "
-                "Expected: <model_id>_<version>.<ext> (e.g. eos4e40_v1.csv)"
+                "Expected: [prefix]_<model_id>_<version>.<ext> "
+                "(e.g. eos4e40_v1.csv)"
             )
         logger.info("Reading %s", path)
         df = _read_file(path)
-        model_id = getattr(df, "model_id", None)
-        if model_id in seen_model_ids:
-            raise EosframesError(
-                f"Model '{model_id}' appears more than once in the input list. "
-                "Each model must be unique when stacking."
-            )
-        seen_model_ids.append(model_id)
+        input_pairs.append((parsed["model_id"], parsed["version"]))
         dfs.append(df)
 
-    reference_inputs = dfs[0]["input"].tolist()
-    for i, df in enumerate(dfs[1:], start=2):
-        if "input" not in df.columns:
-            raise EosframesError(f"File #{i} does not contain an 'input' column.")
-        if df["input"].tolist() != reference_inputs:
+    # Resolve mode from the output filename.
+    mix_suggestion = make_stack_mix_name()
+    explicit_suggestion = make_stack_explicit_name(input_pairs)
+
+    if is_valid_stack_mix_name(output_path):
+        mode = "eosmix"
+    elif is_valid_stack_explicit_name(output_path):
+        out_parsed = parse_stack_explicit_name(output_path) or {"models": []}
+        out_pairs = out_parsed["models"]
+        if out_pairs != input_pairs:
             raise EosframesError(
-                f"Input mismatch: file #{i} has different inputs or a different row order "
-                "than file #1. Stacking requires all files to have identical inputs in the same order."
+                f"Model order mismatch in output filename '{os.path.basename(output_path)}'.\n"
+                f"  From --input:  {input_pairs}\n"
+                f"  From --output: {out_pairs}\n"
+                "The output filename must list each (model_id, version) in the "
+                "same order as the inputs.\n"
+                f"Try: {explicit_suggestion}"
             )
+        mode = "explicit"
+    else:
+        raise EosframesError(
+            f"'{os.path.basename(output_path)}' does not follow a stack "
+            "naming convention.\n\n"
+            "Choose exactly one of:\n"
+            "  Mode A (eosmix):   [prefix]_eosmix.csv\n"
+            "      Feature columns are suffixed with _<model_id>_<version>.\n"
+            f"      Try: {mix_suggestion}\n\n"
+            "  Mode B (explicit): [prefix]_<m1>_<v1>_..._<mN>_<vN>.csv\n"
+            "      Each stacked (model_id, version) appears in the filename "
+            "in -i order. Columns stay bare.\n"
+            f"      Try: {explicit_suggestion}"
+        )
 
-    meta_cols = [c for c in ("key", "input") if c in dfs[0].columns]
-    result = dfs[0][meta_cols].reset_index(drop=True).copy()
-    for df in dfs:
-        model_id = getattr(df, "model_id", None)
-        feature_cols = [c for c in df.columns if c not in {"key", "input"}]
-        block = df[feature_cols].reset_index(drop=True)
-        if suffix:
-            block = block.rename(columns={c: f"{c}.{model_id}" for c in feature_cols})
-        result = pd.concat([result, block], axis=1)
+    result = hstack(dfs, mode=mode)
 
+    meta_cols = [c for c in ("key", "input") if c in result.columns]
     logger.info(
-        "Stacked %d files × %d rows → %d feature columns",
+        "Stacked %d files × %d rows → %d feature columns (mode=%s)",
         len(dfs),
         len(result),
         len(result.columns) - len(meta_cols),
+        mode,
     )
     result.to_csv(output_path, index=False)
     logger.info("Done: %s", output_path)
@@ -350,3 +382,222 @@ def dedupe_file(input_path: str, output_path: str) -> Tuple[int, int]:
 
     logger.info("Done: %s", output_path)
     return before, after
+
+
+# Matches an eosmix column suffix at the END of a name:
+#   "<original>_<model_id>_<version>" where model_id = eos<d><3 alnum>, version = v<digits>
+_EOSMIX_COL_RE = re.compile(r"^(?P<original>.+)_(?P<model_id>eos\d[A-Za-z0-9]{3})_(?P<version>v\d+)$")
+
+
+def _classify_stack_columns_mode_a(
+    feature_cols: List[str],
+) -> List[Tuple[str, str, str, str]]:
+    """Parse Mode A feature columns into (original, model_id, version, suffixed).
+
+    Raises ``EosframesError`` listing any columns whose name doesn't match
+    the eosmix suffix pattern.
+    """
+    parsed = []
+    bad: List[str] = []
+    for col in feature_cols:
+        m = _EOSMIX_COL_RE.match(col)
+        if not m or not is_model_id_valid(m.group("model_id")):
+            bad.append(col)
+            continue
+        parsed.append((m.group("original"), m.group("model_id"), m.group("version"), col))
+    if bad:
+        raise EosframesError(
+            "Some feature columns do not follow the Mode A suffix pattern "
+            "'<original>_<model_id>_<version>':\n  "
+            + ", ".join(bad[:10])
+            + (" ..." if len(bad) > 10 else "")
+            + "\nExpected e.g. 'inhibition_50um_eos4e40_v1'."
+        )
+    return parsed
+
+
+def _classify_stack_columns_mode_b(
+    feature_cols: List[str], models: List[Tuple[str, str]]
+) -> List[Tuple[str, str, str]]:
+    """Assign each bare feature column to a (model_id, version) via run_columns.csv.
+
+    Fetches run_columns.csv for each model, checks that every feature column
+    maps to exactly one model, and returns ``[(col, model_id, version), ...]``.
+
+    Raises ``EosframesError`` on ambiguous (a column listed for 2+ models),
+    unmatched (a column not listed for any model), or missing (a model's
+    run_columns lists columns not present in the stack) cases.
+    """
+    # Fetch run_columns.csv for each model → dict of model -> set of column names.
+    model_cols: List[Tuple[Tuple[str, str], set]] = []
+    for model_id, version in models:
+        df_cols = hub.fetch_columns(model_id, version)
+        if "name" not in df_cols.columns:
+            raise EosframesError(
+                f"run_columns.csv for {model_id} {version} is missing a 'name' column."
+            )
+        model_cols.append(((model_id, version), set(df_cols["name"].astype(str))))
+
+    feat_set = set(feature_cols)
+    assignments: List[Tuple[str, str, str]] = []
+
+    # 1. Check ambiguity (a column listed for 2+ models) and unmatched (a
+    #    column not listed for any model).
+    column_owners: dict = {}
+    for (model_id, version), cols in model_cols:
+        for c in cols:
+            column_owners.setdefault(c, []).append((model_id, version))
+    ambiguous = {c: owners for c, owners in column_owners.items() if len(owners) > 1 and c in feat_set}
+    if ambiguous:
+        msg_lines = [f"  {c!r}: {owners}" for c, owners in list(ambiguous.items())[:5]]
+        raise EosframesError(
+            "Ambiguous columns — the following appear in run_columns.csv of multiple models:\n"
+            + "\n".join(msg_lines)
+        )
+    unmatched = [c for c in feature_cols if c not in column_owners]
+    if unmatched:
+        raise EosframesError(
+            "Unmatched feature columns — none of the stacked models' "
+            "run_columns.csv lists these:\n  " + ", ".join(unmatched[:10])
+            + (" ..." if len(unmatched) > 10 else "")
+        )
+
+    # 2. Check every model's expected columns are present in the stack.
+    missing_report = []
+    for (model_id, version), cols in model_cols:
+        missing = [c for c in cols if c not in feat_set]
+        if missing:
+            missing_report.append(
+                f"  {model_id} {version} is missing: {', '.join(missing[:10])}"
+                + (" ..." if len(missing) > 10 else "")
+            )
+    if missing_report:
+        raise EosframesError(
+            "Stack file is missing feature columns required by the models' run_columns.csv:\n"
+            + "\n".join(missing_report)
+        )
+
+    # 3. Build the assignment in the input order, respecting the model list order.
+    for (model_id, version), cols in model_cols:
+        for c in feature_cols:
+            if c in cols:
+                assignments.append((c, model_id, version))
+
+    return assignments
+
+
+def unstack_file(input_path: str, output_folder: str) -> List[str]:
+    """Split a horizontally stacked CSV back into per-model files.
+
+    The mode is resolved from the input filename:
+
+    * Mode A (``[prefix]_eosmix.csv``) — column names carry the model
+      provenance. Columns are grouped by the ``_<model_id>_<version>``
+      suffix; the suffix is stripped when writing each per-model file.
+    * Mode B (``[prefix]_<m1>_<v1>_..._<mN>_<vN>.csv``) — column names are
+      bare. Each model's ``run_columns.csv`` is fetched from GitHub
+      (via :func:`eosframes.fetch_columns`) and columns are distributed
+      by name.
+
+    The output folder must not already exist and is created fresh. Each
+    per-model file is written as ``<prefix>_<model_id>_<version>.csv`` with
+    ``prefix`` inherited from the stacked filename (dropped when the input
+    is unprefixed).
+
+    Parameters
+    ----------
+    input_path : str
+        Path to a stacked CSV (Mode A or Mode B).
+    output_folder : str
+        Destination folder; must not exist.
+
+    Returns
+    -------
+    list of str
+        Absolute paths of the per-model files that were written, in
+        the order of the stacked models.
+
+    Raises
+    ------
+    EosframesError
+        On invalid filename, missing ``key`` / ``input`` columns, ambiguous
+        or unmatched columns (Mode B), or pre-existing output folder.
+    """
+    logger = get_logger()
+    if os.path.exists(output_folder):
+        raise EosframesError(
+            f"Output folder '{output_folder}' already exists. "
+            "Remove it or choose a different name."
+        )
+
+    mix = parse_stack_mix_name(input_path)
+    explicit = parse_stack_explicit_name(input_path)
+    if mix is not None:
+        mode = "eosmix"
+        prefix = mix["prefix"]
+    elif explicit is not None:
+        mode = "explicit"
+        prefix = explicit["prefix"]
+    else:
+        raise EosframesError(
+            f"'{os.path.basename(input_path)}' does not follow a stack naming "
+            "convention.\n\n"
+            "Expected one of:\n"
+            "  Mode A: [prefix]_eosmix.csv\n"
+            "  Mode B: [prefix]_<m1>_<v1>_..._<mN>_<vN>.csv"
+        )
+
+    logger.info("Reading stacked CSV: %s (mode=%s)", input_path, mode)
+    df = pd.read_csv(input_path)
+    for col in ("key", "input"):
+        if col not in df.columns:
+            raise EosframesError(
+                f"'{input_path}' is missing the required '{col}' column."
+            )
+    feature_cols = [c for c in df.columns if c not in {"key", "input"}]
+
+    # Assemble per-(model, version) column lists.
+    # assignments: [(stacked_col_name, model_id, version, output_col_name), ...]
+    assignments: List[Tuple[str, str, str, str]]
+    if mode == "eosmix":
+        parsed = _classify_stack_columns_mode_a(feature_cols)
+        assignments = [(stacked, mid, ver, original) for original, mid, ver, stacked in parsed]
+    else:
+        pairs = explicit["models"]
+        mode_b = _classify_stack_columns_mode_b(feature_cols, pairs)
+        # Column names stay as-is in Mode B.
+        assignments = [(col, mid, ver, col) for col, mid, ver in mode_b]
+
+    # Group assignments by (model_id, version), preserving model order.
+    per_model: Dict[Tuple[str, str], List[Tuple[str, str]]] = {}
+    order: List[Tuple[str, str]] = []
+    for stacked, mid, ver, output_name in assignments:
+        key = (mid, ver)
+        if key not in per_model:
+            per_model[key] = []
+            order.append(key)
+        per_model[key].append((stacked, output_name))
+
+    # Create the destination folder and write each per-model CSV.
+    os.makedirs(output_folder)
+    written: List[str] = []
+    for (model_id, version) in order:
+        cols = per_model[(model_id, version)]
+        stacked_names = [s for s, _ in cols]
+        output_names = [o for _, o in cols]
+        sub = df[["key", "input", *stacked_names]].copy()
+        # Rename the suffixed columns back to their original names.
+        sub.rename(columns=dict(zip(stacked_names, output_names)), inplace=True)
+        sub.model_id = model_id
+        sub.version = version
+        out_basename = (
+            f"{prefix}_{model_id}_{version}.csv" if prefix else f"{model_id}_{version}.csv"
+        )
+        out_path = os.path.abspath(os.path.join(output_folder, out_basename))
+        write_csv(sub, out_path)
+        written.append(out_path)
+
+    logger.info(
+        "Unstacked %s → %d per-model files in %s", input_path, len(written), output_folder
+    )
+    return written

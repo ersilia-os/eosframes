@@ -7,7 +7,7 @@ import pandas as pd
 
 from ..exceptions import EosframesError
 from ..logger import get_logger
-from ..naming import get_model_id_from_path
+from ..naming import get_model_id_from_path, get_version_from_path
 
 
 def read_csv(file_path: str) -> pd.DataFrame:
@@ -49,6 +49,7 @@ def read_csv(file_path: str) -> pd.DataFrame:
                 f"'{file_path}' is missing the required '{col}' column."
             )
     df.model_id = model_id
+    df.version = get_version_from_path(file_path)
     logger.info("Loaded %d rows (model_id=%s)", len(df), model_id)
     return df
 
@@ -97,6 +98,7 @@ def read_h5(h5_path: str) -> pd.DataFrame:
     meta = {"input": inputs} if keys is None else {"key": keys, "input": inputs}
     df = pd.concat([pd.DataFrame(meta), pd.DataFrame(values, columns=columns)], axis=1)
     df.model_id = model_id
+    df.version = get_version_from_path(h5_path)
     logger.info("Loaded %d rows (model_id=%s)", len(df), model_id)
     return df
 
@@ -163,6 +165,7 @@ def read_chunked_csvs(dir_path: str) -> pd.DataFrame:
     ]
     df = pd.concat(frames, axis=0).reset_index(drop=True)
     df.model_id = model_id
+    df.version = get_version_from_path(dir_path)
     logger.info(
         "Loaded %d rows from %d chunks (model_id=%s)", len(df), len(frames), model_id
     )

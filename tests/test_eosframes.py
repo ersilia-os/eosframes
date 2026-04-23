@@ -289,7 +289,7 @@ class TestSplit:
 
     def test_cli_split(self, tmp):
         out = str(tmp / "chunks")
-        result = _runner().invoke(main, ["split", EOS4E40_CSV, out, "--chunksize", "10"])
+        result = _runner().invoke(main, ["split", EOS4E40_CSV, "-o", out, "--chunksize", "10"])
         assert result.exit_code == 0, result.output
         assert len(os.listdir(out)) == 10
 
@@ -337,7 +337,7 @@ class TestConvert:
 
     def test_cli_csv_to_h5(self, tmp):
         dst = str(tmp / "eos4e40_v1.h5")
-        result = _runner().invoke(main, ["convert", EOS4E40_CSV, dst])
+        result = _runner().invoke(main, ["convert", EOS4E40_CSV, "-o", dst])
         assert result.exit_code == 0, result.output
         assert os.path.exists(dst)
 
@@ -348,31 +348,30 @@ class TestConvert:
 
 class TestStack:
 
-    def test_stack_two_models(self, tmp, df4e40, df7m30):
-        # write both to tmp
+    def test_stack_mode_a_eosmix(self, tmp, df4e40, df7m30):
         p4 = str(tmp / "eos4e40_v1.csv")
         p7 = str(tmp / "eos7m30_v1.csv")
         write_csv(df4e40, p4)
         write_csv(df7m30, p7)
-        out = str(tmp / "stacked.csv")
-        stack_files([p4, p7], out, suffix=True)
+        out = str(tmp / "project_eosmix.csv")
+        stack_files([p4, p7], out)
         df = pd.read_csv(out)
-        # key and input once each
         assert df.columns.tolist().count("key") == 1
         assert df.columns.tolist().count("input") == 1
-        # suffixed columns
-        assert "inhibition_50um.eos4e40" in df.columns
-        assert "molecular_weight.eos7m30" in df.columns
+        # Mode A suffixes columns with _<model_id>_<version>
+        assert "inhibition_50um_eos4e40_v1" in df.columns
+        assert "molecular_weight_eos7m30_v1" in df.columns
         assert len(df) == EOS4E40_ROWS
 
-    def test_stack_no_suffix(self, tmp, df4e40, df7m30):
+    def test_stack_mode_b_explicit(self, tmp, df4e40, df7m30):
         p4 = str(tmp / "eos4e40_v1.csv")
         p7 = str(tmp / "eos7m30_v1.csv")
         write_csv(df4e40, p4)
         write_csv(df7m30, p7)
-        out = str(tmp / "stacked.csv")
-        stack_files([p4, p7], out, suffix=False)
+        out = str(tmp / "eos4e40_v1_eos7m30_v1.csv")
+        stack_files([p4, p7], out)
         df = pd.read_csv(out)
+        # Mode B keeps columns bare (provenance is in the filename)
         assert "inhibition_50um" in df.columns
         assert "molecular_weight" in df.columns
 
@@ -381,17 +380,27 @@ class TestStack:
         p7 = str(tmp / "eos7m30_v1.csv")
         write_csv(df4e40, p4)
         write_csv(df7m30, p7)
-        out = str(tmp / "stacked.csv")
+        out = str(tmp / "eosmix.csv")
         stack_files([p4, p7], out)
         df = pd.read_csv(out)
         n_feat = len(df.columns) - 2  # minus key, input
         assert n_feat == 1 + EOS7M30_N_FEATURES
 
-    def test_stack_duplicate_model_raises(self, tmp, df4e40):
+    def test_stack_duplicate_model_version_raises(self, tmp, df4e40):
         p = str(tmp / "eos4e40_v1.csv")
         write_csv(df4e40, p)
-        with pytest.raises(EosframesError, match="more than once"):
-            stack_files([p, p], str(tmp / "out.csv"))
+        with pytest.raises(EosframesError, match="Duplicate"):
+            stack_files([p, p], str(tmp / "eosmix.csv"))
+
+    def test_stack_mode_b_order_mismatch_raises(self, tmp, df4e40, df7m30):
+        p4 = str(tmp / "eos4e40_v1.csv")
+        p7 = str(tmp / "eos7m30_v1.csv")
+        write_csv(df4e40, p4)
+        write_csv(df7m30, p7)
+        # -i order is (eos4e40, eos7m30), but output lists them reversed.
+        wrong_out = str(tmp / "eos7m30_v1_eos4e40_v1.csv")
+        with pytest.raises(EosframesError, match="Model order mismatch"):
+            stack_files([p4, p7], wrong_out)
 
     def test_stack_input_mismatch_raises(self, tmp, df4e40):
         p4a = str(tmp / "eos4e40_v1.csv")
@@ -402,19 +411,31 @@ class TestStack:
         df_diff.model_id = "eos7m30"
         write_csv(df_diff, p4b)
         with pytest.raises(EosframesError, match="mismatch"):
-            stack_files([p4a, p4b], str(tmp / "out.csv"))
+            stack_files([p4a, p4b], str(tmp / "eosmix.csv"))
 
-    def test_hstack_api(self, df4e40, df7m30):
-        result = hstack([df4e40, df7m30])
-        assert "inhibition_50um.eos4e40" in result.columns
+    def test_hstack_api_eosmix(self, df4e40, df7m30):
+        # Readers that populated df4e40/df7m30 must have set df.version;
+        # df.version is needed for eosmix-mode column suffixing.
+        df4e40.version = "v1"
+        df7m30.version = "v1"
+        result = hstack([df4e40, df7m30], mode="eosmix")
+        assert "inhibition_50um_eos4e40_v1" in result.columns
         assert len(result) == EOS4E40_ROWS
+
+    def test_hstack_api_explicit(self, df4e40, df7m30):
+        df4e40.version = "v1"
+        df7m30.version = "v1"
+        result = hstack([df4e40, df7m30], mode="explicit")
+        # Columns stay bare
+        assert "inhibition_50um" in result.columns
+        assert "molecular_weight" in result.columns
 
     def test_cli_stack(self, tmp, df4e40, df7m30):
         p4 = str(tmp / "eos4e40_v1.csv")
         p7 = str(tmp / "eos7m30_v1.csv")
         write_csv(df4e40, p4)
         write_csv(df7m30, p7)
-        out = str(tmp / "stacked.csv")
+        out = str(tmp / "eos4e40_v1_eos7m30_v1.csv")
         result = _runner().invoke(main, ["stack", p4, p7, "-o", out])
         assert result.exit_code == 0, result.output
         assert os.path.exists(out)
@@ -526,7 +547,7 @@ class TestDedupe:
         src = str(tmp / "eos4e40_v1_raw.csv")
         df_dup.to_csv(src, index=False)
         dst = str(tmp / "eos4e40_v1.csv")
-        result = _runner().invoke(main, ["dedupe", src, dst])
+        result = _runner().invoke(main, ["dedupe", src, "-o", dst])
         assert result.exit_code == 0, result.output
         assert len(pd.read_csv(dst)) == EOS4E40_ROWS
 

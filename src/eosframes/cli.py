@@ -1,4 +1,5 @@
 import os
+from typing import Optional
 
 import click
 import pandas as pd
@@ -7,10 +8,107 @@ from . import hub, ops
 from . import scale as _scale
 from .exceptions import EosframesError
 from .logger import get_logger
+from .naming import (
+    is_valid_columns_name,
+    is_valid_info_name,
+    is_valid_summary_name,
+    make_columns_name,
+    make_info_name,
+    make_summary_name,
+    parse_name,
+)
 
 
 def _err(e: EosframesError) -> click.ClickException:
     return click.ClickException(str(e))
+
+
+def _parse_input_or_fail(input_path: str) -> dict:
+    """Parse a data file/dir path or raise a ClickException with a helpful message."""
+    parsed = parse_name(input_path)
+    basename = os.path.basename(input_path.rstrip("/\\"))
+    if parsed is None:
+        raise click.ClickException(
+            f"'{basename}' does not follow the Ersilia naming convention.\n\n"
+            "Expected one of (prefix optional):\n"
+            "  [prefix]_<model_id>_<version>.csv   e.g. eos4e40_v1.csv, example_eos4e40_v1.csv\n"
+            "  [prefix]_<model_id>_<version>.h5    e.g. eos4e40_v1.h5\n"
+            "  [prefix]_<model_id>_<version>_chunks/  e.g. eos4e40_v1_chunks/\n\n"
+            "model_id = 'eos' + 1 digit + 3 alphanumeric (e.g. eos4e40).\n"
+            "version  = 'v' + integer             (e.g. v1).\n\n"
+            f"Try renaming to something like 'eos4e40_v1{os.path.splitext(basename)[1] or '.csv'}'."
+        )
+    if parsed["name_type"] not in {"csv", "h5", "chunks_dir"}:
+        raise click.ClickException(
+            f"'{basename}' is a '{parsed['name_type']}' sidecar file, not a data file.\n"
+            "Pass the original .csv / .h5 / _chunks/ file instead."
+        )
+    return parsed
+
+
+def _resolve_sidecar_output(
+    output: Optional[str], parsed_input: dict, kind: str
+) -> Optional[str]:
+    """Validate an info/columns/summary sidecar output path.
+
+    ``kind`` is one of ``"info"``, ``"columns"``, ``"summary"``. Returns
+    ``output`` on success, ``None`` if ``output`` is ``None``, and raises
+    ``ClickException`` with a suggested filename on any violation.
+    """
+    if output is None:
+        return None
+
+    model_id = parsed_input["model_id"]
+    version = parsed_input["version"]
+    make_name = {
+        "info": make_info_name,
+        "columns": make_columns_name,
+        "summary": make_summary_name,
+    }[kind]
+    validator = {
+        "info": is_valid_info_name,
+        "columns": is_valid_columns_name,
+        "summary": is_valid_summary_name,
+    }[kind]
+    suggested = make_name(model_id, version)
+    suggested_with_prefix = make_name(model_id, version, prefix="example")
+
+    out_basename = os.path.basename(output)
+    if not validator(output):
+        raise click.ClickException(
+            f"'{out_basename}' is not a valid {kind}-sidecar filename.\n\n"
+            f"The filename must end with the literal suffix '_{kind}.csv' — the "
+            f"'_{kind}' token is required, not optional.\n\n"
+            f"Expected: [prefix]_<model_id>_<version>_{kind}.csv\n"
+            "  where:\n"
+            "    [prefix]   optional, e.g. 'example' or '260313_gardp'\n"
+            f"    model_id   must match --input ('{model_id}')\n"
+            f"    version    must match --input ('{version}')\n"
+            f"    _{kind}     literal token (required)\n\n"
+            f"Try: {suggested}\n"
+            f"Or with a prefix: {suggested_with_prefix}"
+        )
+
+    out_parsed = parse_name(output)
+    if out_parsed["model_id"] != model_id:
+        raise click.ClickException(
+            f"Model ID mismatch: input file is for '{model_id}' but '{out_basename}' "
+            f"encodes '{out_parsed['model_id']}'.\n"
+            f"Try: {suggested}"
+        )
+    if out_parsed["version"] != version:
+        raise click.ClickException(
+            f"Version mismatch: input file is '{version}' but '{out_basename}' "
+            f"encodes '{out_parsed['version']}'.\n"
+            f"Try: {suggested}"
+        )
+
+    if os.path.exists(output):
+        raise click.ClickException(
+            f"Output file '{output}' already exists. Remove it first."
+        )
+
+    return output
 
 
 @click.group()
@@ -23,9 +121,16 @@ def main():
     """
 
 
-@main.command()
+@main.command(short_help="Split a CSV into numbered chunk files.")
 @click.argument("input_csv", type=click.Path(exists=True, dir_okay=False))
-@click.argument("output_folder", type=click.Path())
+@click.option(
+    "--output",
+    "-o",
+    "output_folder",
+    required=True,
+    type=click.Path(),
+    help="Destination folder (must not exist; will be created).",
+)
 @click.option(
     "--chunksize",
     default=10000,
@@ -33,7 +138,7 @@ def main():
     help="Number of rows per chunk file.",
 )
 def split(input_csv: str, output_folder: str, chunksize: int) -> None:
-    """Split INPUT_CSV into numbered chunk files inside OUTPUT_FOLDER.
+    """Split the input CSV into numbered chunk files inside the output folder.
 
     Works with any CSV file — raw input data, Ersilia model outputs, or
     any other tabular file. The column header is preserved in every chunk.
@@ -48,14 +153,21 @@ def split(input_csv: str, output_folder: str, chunksize: int) -> None:
         raise _err(e) from e
 
 
-@main.command()
-@click.argument("input", type=click.Path(exists=True))
-@click.argument("output")
-def convert(input: str, output: str) -> None:
-    """Convert INPUT to OUTPUT, inferring format from file extensions.
+@main.command(short_help="Convert between CSV, H5, and chunk folders.")
+@click.argument("input_path", type=click.Path(exists=True))
+@click.option(
+    "--output",
+    "-o",
+    "output_path",
+    required=True,
+    type=click.Path(),
+    help="Output file. Must follow the naming convention (eos4e40_v1.csv or eos4e40_v1.h5).",
+)
+def convert(input_path: str, output_path: str) -> None:
+    """Convert between CSV, H5, and chunk folders, inferring format from file extensions.
 
-    INPUT can be a CSV file, an H5 file, or a folder of chunk CSV files.
-    OUTPUT must follow the naming convention: eos4e40_v1.csv or eos4e40_v1.h5.
+    The input can be a CSV file, an H5 file, or a folder of chunk CSV files.
+    The output must follow the naming convention: eos4e40_v1.csv or eos4e40_v1.h5.
 
     Supported conversions:
 
@@ -66,12 +178,12 @@ def convert(input: str, output: str) -> None:
       .h5      → eos4e40_v1.csv   (H5 to CSV)
     """
     try:
-        ops.convert_file(input, output)
+        ops.convert_file(input_path, output_path)
     except EosframesError as e:
         raise _err(e) from e
 
 
-@main.command()
+@main.command(short_help="Horizontally stack outputs from multiple models.")
 @click.argument(
     "inputs", nargs=-1, required=True, type=click.Path(exists=True, dir_okay=False)
 )
@@ -80,19 +192,13 @@ def convert(input: str, output: str) -> None:
     "-o",
     required=True,
     type=click.Path(),
-    help="Output CSV file path.",
-)
-@click.option(
-    "--suffix/--no-suffix",
-    default=True,
-    show_default=True,
     help=(
-        "Append the model identifier as a suffix to feature column names "
-        "(e.g. 'score' → 'score.eos4e40'). "
-        "Recommended when stacking outputs from multiple models."
+        "Output CSV. Must follow one of the two stack conventions: "
+        "[prefix]_eosmix.csv (columns suffixed with _<model_id>_<version>) "
+        "or [prefix]_<m1>_<v1>_..._<mN>_<vN>.csv in input order (columns bare)."
     ),
 )
-def stack(inputs: tuple, output: str, suffix: bool) -> None:
+def stack(inputs: tuple, output: str) -> None:
     """Horizontally stack outputs from multiple Ersilia models into one CSV.
 
     Each INPUT must be a CSV or H5 file following the naming convention
@@ -100,20 +206,66 @@ def stack(inputs: tuple, output: str, suffix: bool) -> None:
     same order — this is validated before stacking.
 
     The 'key' and 'input' columns are kept only once in the output.
-    Feature columns from each model are appended side by side.
+
+    The naming of the output file picks the column convention (pick one):
 
     \b
-    Example:
-      eosframes stack eos4e40_v1.csv eos3804_v1.csv -o stacked.csv
-      eosframes stack eos4e40_v1.csv eos3804_v1.h5  -o stacked.csv --no-suffix
+      Mode A:  [prefix]_eosmix.csv
+               → each feature column becomes <column>_<model_id>_<version>
+      Mode B:  [prefix]_<m1>_<v1>_..._<mN>_<vN>.csv
+               → feature columns stay bare; each model appears in the
+                 filename in the same order as the INPUTS.
+
+    \b
+    Examples:
+      eosframes stack eos4e40_v1.csv eos3804_v1.csv -o project_eosmix.csv
+      eosframes stack eos4e40_v1.csv eos3804_v1.csv -o eos4e40_v1_eos3804_v1.csv
     """
     try:
-        ops.stack_files(list(inputs), output, suffix=suffix)
+        ops.stack_files(list(inputs), output)
     except EosframesError as e:
         raise _err(e) from e
 
 
-@main.command()
+@main.command(short_help="Split a stacked CSV back into per-model files.")
+@click.argument("input_file", type=click.Path(exists=True, dir_okay=False))
+@click.option(
+    "--output",
+    "-o",
+    "output_folder",
+    required=True,
+    type=click.Path(),
+    help="Destination folder (must not exist; will be created).",
+)
+def unstack(input_file: str, output_folder: str) -> None:
+    """Split a stacked CSV back into per-model files in a fresh folder.
+
+    The mode is resolved from the input filename:
+
+    \b
+      Mode A ([prefix]_eosmix.csv):
+        Column names carry the provenance. Columns are grouped by their
+        _<model_id>_<version> suffix; the suffix is stripped when writing
+        each per-model file.
+      Mode B ([prefix]_<m1>_<v1>_..._<mN>_<vN>.csv):
+        Column names are bare. Each model's run_columns.csv is fetched
+        from GitHub and columns are distributed by name.
+
+    Each per-model file is written as <prefix>_<model_id>_<version>.csv
+    with the prefix inherited from the stacked filename.
+
+    \b
+    Examples:
+      eosframes unstack project_eosmix.csv -o ./split/
+      eosframes unstack eos4e40_v1_eos7m30_v1.csv -o ./split/
+    """
+    try:
+        ops.unstack_file(input_file, output_folder)
+    except EosframesError as e:
+        raise _err(e) from e
+
+
+@main.command(short_help="Vertically concatenate files from the same model.")
 @click.argument(
     "inputs", nargs=-1, required=True, type=click.Path(exists=True, dir_okay=False)
 )
@@ -131,8 +283,8 @@ def append(inputs: tuple, output: str) -> None:
     appended in the order the files are given. All files must have identical
     columns.
 
-    OUTPUT must follow the naming convention and its model ID must match the
-    inputs. Format is inferred from the output extension (.csv or .h5).
+    The output must follow the naming convention and its model ID must match
+    the inputs. Format is inferred from the output extension (.csv or .h5).
 
     \b
     Example:
@@ -145,19 +297,26 @@ def append(inputs: tuple, output: str) -> None:
         raise _err(e) from e
 
 
-@main.command()
+@main.command(short_help="Remove duplicate rows by key.")
 @click.argument("input_file", type=click.Path(exists=True, dir_okay=False))
-@click.argument("output_file")
+@click.option(
+    "--output",
+    "-o",
+    "output_file",
+    required=True,
+    type=click.Path(),
+    help="Output file (must follow naming convention; same model ID as input).",
+)
 def dedupe(input_file: str, output_file: str) -> None:
     """Remove duplicate rows by key, keeping the first occurrence.
 
-    Reads INPUT_FILE, drops any row whose 'key' value has already appeared,
-    and writes the result to OUTPUT_FILE. Both files must share the same model
-    ID. Output format is inferred from the extension (.csv or .h5).
+    Reads the input, drops any row whose 'key' value has already appeared,
+    and writes the result to the output file. Both files must share the
+    same model ID. Output format is inferred from the extension (.csv or .h5).
 
     \b
     Example:
-      eosframes dedupe eos4e40_v1_raw.csv eos4e40_v1.csv
+      eosframes dedupe eos4e40_v1_raw.csv -o eos4e40_v1.csv
     """
     try:
         ops.dedupe_file(input_file, output_file)
@@ -165,46 +324,121 @@ def dedupe(input_file: str, output_file: str) -> None:
         raise _err(e) from e
 
 
-@main.command()
+@main.command(short_help="Summarize an Ersilia output file.")
 @click.argument("input_file", type=click.Path(exists=True, dir_okay=False))
-def summary(input_file: str) -> None:
-    """Print a summary of an Ersilia output file.
+@click.option(
+    "--output",
+    "-o",
+    default=None,
+    type=click.Path(),
+    help=(
+        "Optional sidecar CSV to write with per-feature stats (column, dtype, "
+        "missing, min, mean, max). Must follow "
+        "[prefix]_<model_id>_<version>_summary.csv with matching model_id / version. "
+        "Omit to print only."
+    ),
+)
+def summary(input_file: str, output: str) -> None:
+    """Summarize an Ersilia output file.
 
-    Displays file metadata, row/column counts, and per-feature statistics
-    (dtype, missing values, min, mean, max) for numeric columns.
+    Displays file metadata, row/column counts, duplicate/missing-data flags,
+    and per-feature statistics (dtype, missing, min, mean, max).
+
+    With --output, the per-feature stats are also written as a sidecar CSV
+    (one row per feature column).
 
     \b
-    Example:
+    Examples:
       eosframes summary eos4e40_v1.csv
-      eosframes summary eos4e40_v1.h5
+      eosframes summary eos4e40_v1.csv -o eos4e40_v1_summary.csv
     """
     from rich import box
     from rich.console import Console
     from rich.table import Table
 
-    from .naming import parse_name
-
     console = Console()
     df = ops._read_file(input_file)
 
+    # Resolve filename-based metadata (model_id, version) — required for the
+    # -o naming-convention check and surfaced in the header block.
+    parsed_in = parse_name(input_file)
+    resolved_out = _resolve_sidecar_output(output, parsed_in, "summary") if parsed_in else None
+    if output is not None and parsed_in is None:
+        # -o given but input filename doesn't follow the convention — we
+        # can't validate/build a matching sidecar name. Reject explicitly.
+        _parse_input_or_fail(input_file)  # raises with the verbose error
+
     model_id = getattr(df, "model_id", "unknown")
-    parsed = parse_name(input_file)
-    version = parsed["version"] if parsed else "unknown"
+    version = parsed_in["version"] if parsed_in else "unknown"
     fmt = os.path.splitext(input_file)[1].lstrip(".")
     file_size_kb = os.path.getsize(input_file) / 1024
 
+    meta_cols = [c for c in ("key", "input") if c in df.columns]
     feature_cols = [c for c in df.columns if c not in {"key", "input"}]
-    has_key = "key" in df.columns
+    uniq_col = "key" if "key" in df.columns else ("input" if "input" in df.columns else None)
+
+    # Compute per-feature stats once — reused by pretty-print and CSV output.
+    def _fmt(v: float) -> str:
+        return f"{v:.0f}" if v == int(v) else f"{v:.4g}"
+
+    stats_rows = []
+    for col in feature_cols:
+        series = df[col]
+        n_missing = int(series.isna().sum())
+        row = {
+            "column": col,
+            "dtype": str(series.dtype),
+            "missing": n_missing,
+            "min": None,
+            "mean": None,
+            "max": None,
+        }
+        if pd.api.types.is_numeric_dtype(series):
+            clean = series.dropna()
+            if len(clean):
+                row["min"] = float(clean.min())
+                row["mean"] = float(clean.mean())
+                row["max"] = float(clean.max())
+        stats_rows.append(row)
+
+    def _label_row(label: str, value: str) -> None:
+        # Pad label to 14 chars so values line up (longest label = "Unique inputs:" = 14).
+        console.print(f"  [bold]{label + ':':<15}[/bold]{value}")
 
     console.print()
     console.rule(f"[bold cyan]{os.path.basename(input_file)}[/bold cyan]")
-    console.print(f"  [bold]Model ID:[/bold]  {model_id}")
-    console.print(f"  [bold]Version:[/bold]   {version}")
-    console.print(f"  [bold]Format:[/bold]    {fmt.upper()}")
-    console.print(f"  [bold]Size:[/bold]      {file_size_kb:.1f} KB")
-    console.print(f"  [bold]Rows:[/bold]      {len(df):,}")
-    console.print(f"  [bold]Features:[/bold]  {len(feature_cols)} column(s)")
-    console.print(f"  [bold]Has key:[/bold]   {'yes' if has_key else 'no'}")
+    _label_row("Model ID", model_id)
+    _label_row("Version", version)
+    _label_row("Format", fmt.upper())
+    _label_row("Size", f"{file_size_kb:.1f} KB")
+    _label_row(
+        "Columns",
+        f"{len(df.columns)} ({len(meta_cols)} meta + {len(feature_cols)} features)",
+    )
+    _label_row("Rows", f"{len(df):,}")
+    if uniq_col is not None:
+        total = len(df)
+        unique = int(df[uniq_col].nunique())
+        _label_row(
+            "Unique keys" if uniq_col == "key" else "Unique inputs",
+            f"{unique:,}",
+        )
+        if unique == total:
+            dup_str = "[green]no[/green]"
+        else:
+            dup_str = f"[yellow]yes ({total - unique:,})[/yellow]"
+        _label_row("Duplicates", dup_str)
+
+    total_missing = sum(r["missing"] for r in stats_rows)
+    if total_missing == 0:
+        miss_str = "[green]no[/green]"
+    else:
+        n_cols_with_missing = sum(1 for r in stats_rows if r["missing"] > 0)
+        miss_str = (
+            f"[yellow]yes ({total_missing:,} cells in "
+            f"{n_cols_with_missing} column{'s' if n_cols_with_missing != 1 else ''})[/yellow]"
+        )
+    _label_row("Missing data", miss_str)
 
     if not feature_cols:
         console.print("\n  [dim]No feature columns found.[/dim]")
@@ -217,77 +451,81 @@ def summary(input_file: str) -> None:
         header_style="bold magenta",
         show_edge=False,
     )
-    table.add_column("Column", style="cyan", no_wrap=True)
+    table.add_column("column", style="cyan", no_wrap=True)
     table.add_column("dtype", justify="center")
-    table.add_column("Missing", justify="right")
-    table.add_column("Min", justify="right")
-    table.add_column("Mean", justify="right")
-    table.add_column("Max", justify="right")
+    table.add_column("missing", justify="right")
+    table.add_column("min", justify="right")
+    table.add_column("mean", justify="right")
+    table.add_column("max", justify="right")
 
-    for col in feature_cols:
-        series = df[col]
-        n_missing = series.isna().sum()
+    for row in stats_rows:
+        series = df[row["column"]]
         missing_str = (
-            str(n_missing) if n_missing == 0 else f"[yellow]{n_missing}[/yellow]"
+            str(row["missing"])
+            if row["missing"] == 0
+            else f"[yellow]{row['missing']}[/yellow]"
         )
-
         if pd.api.types.is_numeric_dtype(series):
-            clean = series.dropna()
-            if len(clean) == 0:
+            if row["min"] is None:
                 min_s = mean_s = max_s = "[dim]—[/dim]"
             else:
-
-                def _fmt(v):
-                    return f"{v:.0f}" if v == int(v) else f"{v:.4g}"
-
-                min_s = _fmt(clean.min())
-                mean_s = _fmt(clean.mean())
-                max_s = _fmt(clean.max())
+                min_s = _fmt(row["min"])
+                mean_s = _fmt(row["mean"])
+                max_s = _fmt(row["max"])
         else:
             n_unique = series.nunique()
             min_s = "[dim]—[/dim]"
             mean_s = f"[dim]{n_unique} unique[/dim]"
             max_s = "[dim]—[/dim]"
-
-        table.add_row(col, str(series.dtype), missing_str, min_s, mean_s, max_s)
+        table.add_row(
+            row["column"], row["dtype"], missing_str, min_s, mean_s, max_s
+        )
 
     console.print(table)
 
+    if resolved_out is not None:
+        pd.DataFrame(stats_rows).to_csv(resolved_out, index=False)
+        get_logger().info(
+            "Summary written to %s (%d feature(s))", resolved_out, len(stats_rows)
+        )
+        click.echo(resolved_out)
 
-@main.command()
-@click.argument("model_id")
+
+@main.command(short_help="Show metadata for a model.")
+@click.argument("input_file", type=click.Path(exists=True))
 @click.option(
     "--output",
     "-o",
     default=None,
     type=click.Path(),
-    help="Output CSV path. Defaults to <model_id>_metadata.csv.",
+    help=(
+        "Optional sidecar CSV to write. Must follow "
+        "[prefix]_<model_id>_<version>_info.csv, with model_id and version "
+        "matching the input file. Omit to print only."
+    ),
 )
-def info(model_id: str, output: str) -> None:
-    """Fetch metadata for a model from GitHub and save it as a CSV.
+def info(input_file: str, output: str) -> None:
+    """Show metadata for the model identified by the input file.
 
-    Retrieves the metadata.json (or metadata.yml) from the model's GitHub
-    repository at https://github.com/ersilia-os/<MODEL_ID> and writes all
-    fields as a two-column CSV (field, value).
+    The input must follow the Ersilia naming convention; the model ID and
+    version are resolved from its name.
 
-    List-valued fields are joined with ' | '. The output file does not need
-    to follow the Ersilia naming convention.
+    With --output, a sidecar CSV is also written. The output must follow
+    [prefix]_<model_id>_<version>_info.csv and its model_id / version must
+    match the input.
 
     \b
     Examples:
-      eosframes info eos4e40
-      eosframes info eos4e40 -o my_metadata.csv
+      eosframes info data/example_eos4e40_v1.csv
+      eosframes info data/example_eos4e40_v1.csv -o example_eos4e40_v1_info.csv
     """
-    logger = get_logger()
+    from rich import box
+    from rich.console import Console
+    from rich.table import Table
 
-    if output is None:
-        output = f"{model_id}_metadata.csv"
-    if not output.endswith(".csv"):
-        raise click.ClickException("Output must be a .csv file.")
-    if os.path.exists(output):
-        raise click.ClickException(
-            f"Output file '{output}' already exists. Remove it first."
-        )
+    parsed_in = _parse_input_or_fail(input_file)
+    resolved_out = _resolve_sidecar_output(output, parsed_in, "info")
+    model_id = parsed_in["model_id"]
 
     try:
         metadata = hub.fetch_metadata(model_id)
@@ -305,56 +543,104 @@ def info(model_id: str, output: str) -> None:
             return ""
         return str(v)
 
-    rows = [{"field": k, "value": _flatten(v)} for k, v in metadata.items()]
-    pd.DataFrame(rows).to_csv(output, index=False)
-    logger.info("Metadata written to %s (%d fields)", output, len(rows))
-    click.echo(output)
+    rows = [(k, _flatten(v)) for k, v in metadata.items()]
+
+    console = Console()
+    console.print()
+    console.rule(f"[bold cyan]{os.path.basename(input_file)}[/bold cyan]")
+    table = Table(
+        box=box.SIMPLE_HEAD,
+        show_header=True,
+        header_style="bold magenta",
+        show_edge=False,
+    )
+    table.add_column("field", style="cyan", no_wrap=True)
+    table.add_column("value", overflow="fold")
+    for field, value in rows:
+        table.add_row(field, value if value else "[dim]—[/dim]")
+    console.print(table)
+
+    if resolved_out is not None:
+        pd.DataFrame(
+            {"field": [k for k, _ in rows], "value": [v for _, v in rows]}
+        ).to_csv(resolved_out, index=False)
+        logger = get_logger()
+        logger.info("Metadata written to %s (%d fields)", resolved_out, len(rows))
+        click.echo(resolved_out)
 
 
-@main.command()
-@click.argument("model_id")
-@click.argument("version")
+@main.command(short_help="Show feature column definitions for a model version.")
+@click.argument("input_file", type=click.Path(exists=True))
 @click.option(
     "--output",
     "-o",
     default=None,
     type=click.Path(),
-    help="Output CSV path. Defaults to <model_id>_<version>_columns.csv.",
+    help=(
+        "Optional sidecar CSV to write. Must follow "
+        "[prefix]_<model_id>_<version>_columns.csv, with model_id and version "
+        "matching the input file. Omit to print only."
+    ),
 )
-def columns(model_id: str, version: str, output: str) -> None:
-    """Fetch the run_columns.csv for a model version from GitHub.
+def columns(input_file: str, output: str) -> None:
+    """Show the feature column definitions for the model version of the input.
 
-    Downloads model/framework/columns/run_columns.csv from the model's
-    GitHub repository. The version is used to resolve the git ref
-    (e.g. 'v1' → tag 'v1.0.0', falling back to 'main').
+    The input must follow the Ersilia naming convention; the model ID and
+    version are resolved from its name.
+
+    With --output, a sidecar CSV is also written. The output must follow
+    [prefix]_<model_id>_<version>_columns.csv and its model_id / version must
+    match the input.
 
     \b
     Examples:
-      eosframes columns eos4e40 v1
-      eosframes columns eos4e40 v1 -o my_columns.csv
+      eosframes columns data/example_eos4e40_v1.csv
+      eosframes columns data/example_eos4e40_v1.csv -o example_eos4e40_v1_columns.csv
     """
-    logger = get_logger()
+    from rich import box
+    from rich.console import Console
+    from rich.table import Table
 
-    if output is None:
-        output = f"{model_id}_{version}_columns.csv"
-    if not output.endswith(".csv"):
-        raise click.ClickException("Output must be a .csv file.")
-    if os.path.exists(output):
-        raise click.ClickException(
-            f"Output file '{output}' already exists. Remove it first."
-        )
+    parsed_in = _parse_input_or_fail(input_file)
+    resolved_out = _resolve_sidecar_output(output, parsed_in, "columns")
+    model_id = parsed_in["model_id"]
+    version = parsed_in["version"]
 
     try:
         df = hub.fetch_columns(model_id, version)
     except EosframesError as e:
         raise _err(e) from e
 
-    df.to_csv(output, index=False)
-    logger.info("Columns written to %s (%d column(s))", output, len(df))
-    click.echo(output)
+    console = Console()
+    console.print()
+    console.rule(f"[bold cyan]{os.path.basename(input_file)}[/bold cyan]")
+    table = Table(
+        box=box.SIMPLE_HEAD,
+        show_header=True,
+        header_style="bold magenta",
+        show_edge=False,
+    )
+    for col in df.columns:
+        table.add_column(
+            str(col),
+            style="cyan" if col == "name" else None,
+            overflow="fold",
+            no_wrap=(col == "name"),
+        )
+    for _, row in df.iterrows():
+        table.add_row(
+            *(str(v) if pd.notna(v) else "[dim]—[/dim]" for v in row)
+        )
+    console.print(table)
+
+    if resolved_out is not None:
+        df.to_csv(resolved_out, index=False)
+        logger = get_logger()
+        logger.info("Columns written to %s (%d column(s))", resolved_out, len(df))
+        click.echo(resolved_out)
 
 
-@main.command()
+@main.command(short_help="Scale the numeric feature columns.")
 @click.argument("input_file", type=click.Path(exists=True, dir_okay=False))
 @click.option(
     "--output",
@@ -385,13 +671,13 @@ def columns(model_id: str, version: str, output: str) -> None:
 def transform(
     input_file: str, output: str, params: str, fit: bool, method: str
 ) -> None:
-    """Scale the numeric feature columns of INPUT_FILE.
+    """Scale the numeric feature columns of the input.
 
     Three modes depending on --params and --fit:
 
     \b
-      No --params          fit on INPUT_FILE, discard parameters.
-      --params FILE --fit  fit on INPUT_FILE, save parameters to FILE.
+      No --params          fit on the input, discard parameters.
+      --params FILE --fit  fit on the input, save parameters to FILE.
       --params FILE        load parameters from FILE, apply (forward pass).
 
     Only numeric feature columns are scaled. Columns with more than 25 %
