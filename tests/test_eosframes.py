@@ -11,7 +11,6 @@ Run with:
 
 import json
 import os
-import shutil
 
 import h5py
 import numpy as np
@@ -19,17 +18,13 @@ import pandas as pd
 import pytest
 from click.testing import CliRunner
 
-import eosframes
 from eosframes import (
     EosframesError,
     append_files,
     apply_scaler,
     convert_file,
     dedupe_file,
-    fetch_columns,
-    fetch_metadata,
     fit_scaler,
-    transform_file,
     hstack,
     is_valid_name,
     make_chunks_dir_name,
@@ -39,6 +34,7 @@ from eosframes import (
     read_h5,
     split_csv,
     stack_files,
+    transform_file,
     vstack,
     write_csv,
     write_h5,
@@ -63,6 +59,7 @@ EOS7M30_N_FEATURES = 49
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture()
 def tmp(tmp_path):
@@ -93,15 +90,25 @@ def _runner():
 # 1. Naming convention
 # ===========================================================================
 
-class TestNaming:
 
+class TestNaming:
     def test_parse_canonical_csv(self):
         r = parse_name("eos4e40_v1.csv")
-        assert r == {"model_id": "eos4e40", "version": "v1", "extension": "csv", "name_type": "csv"}
+        assert r == {
+            "model_id": "eos4e40",
+            "version": "v1",
+            "extension": "csv",
+            "name_type": "csv",
+        }
 
     def test_parse_canonical_h5(self):
         r = parse_name("eos4e40_v1.h5")
-        assert r == {"model_id": "eos4e40", "version": "v1", "extension": "h5", "name_type": "h5"}
+        assert r == {
+            "model_id": "eos4e40",
+            "version": "v1",
+            "extension": "h5",
+            "name_type": "h5",
+        }
 
     def test_parse_chunks_dir(self):
         r = parse_name("eos4e40_v1_chunks")
@@ -136,8 +143,12 @@ class TestNaming:
         assert parse_name("output.csv") is None
 
     def test_is_valid_true(self):
-        for name in ("eos4e40_v1.csv", "eos3804_v2.h5", "eos4e40_v1_chunks",
-                     "date_eos4e40_v1.csv"):
+        for name in (
+            "eos4e40_v1.csv",
+            "eos3804_v2.h5",
+            "eos4e40_v1_chunks",
+            "date_eos4e40_v1.csv",
+        ):
             assert is_valid_name(name), f"expected valid: {name}"
 
     def test_is_valid_false(self):
@@ -176,8 +187,8 @@ class TestNaming:
 # 2. Read / write
 # ===========================================================================
 
-class TestReadWrite:
 
+class TestReadWrite:
     def test_read_csv_eos4e40(self):
         df = read_csv(EOS4E40_CSV)
         assert len(df) == EOS4E40_ROWS
@@ -196,7 +207,9 @@ class TestReadWrite:
         path = str(tmp / "eos4e40_v1.csv")
         write_csv(df4e40, path)
         df2 = read_csv(path)
-        pd.testing.assert_frame_equal(df4e40.reset_index(drop=True), df2.reset_index(drop=True))
+        pd.testing.assert_frame_equal(
+            df4e40.reset_index(drop=True), df2.reset_index(drop=True)
+        )
 
     def test_round_trip_h5_eos4e40(self, tmp, df4e40):
         path = str(tmp / "eos4e40_v1.h5")
@@ -243,8 +256,8 @@ class TestReadWrite:
 # 3. Split
 # ===========================================================================
 
-class TestSplit:
 
+class TestSplit:
     def test_split_eos4e40(self, tmp):
         out = str(tmp / "chunks")
         n = split_csv(EOS4E40_CSV, out, chunksize=10)
@@ -281,7 +294,9 @@ class TestSplit:
         # manufacture a file with enough rows to trigger 6-digit padding (>999 chunks)
         # we fake it by using chunksize=1 and a 1000-row file
         big = str(tmp / "big.csv")
-        pd.DataFrame({"key": range(1000), "input": range(1000), "v": range(1000)}).to_csv(big, index=False)
+        pd.DataFrame(
+            {"key": range(1000), "input": range(1000), "v": range(1000)}
+        ).to_csv(big, index=False)
         out = str(tmp / "chunks")
         split_csv(big, out, chunksize=1)
         files = os.listdir(out)
@@ -289,7 +304,9 @@ class TestSplit:
 
     def test_cli_split(self, tmp):
         out = str(tmp / "chunks")
-        result = _runner().invoke(main, ["split", EOS4E40_CSV, "-o", out, "--chunksize", "10"])
+        result = _runner().invoke(
+            main, ["split", EOS4E40_CSV, "-o", out, "--chunksize", "10"]
+        )
         assert result.exit_code == 0, result.output
         assert len(os.listdir(out)) == 10
 
@@ -298,8 +315,8 @@ class TestSplit:
 # 4. Convert
 # ===========================================================================
 
-class TestConvert:
 
+class TestConvert:
     def test_csv_to_h5(self, tmp):
         dst = str(tmp / "eos4e40_v1.h5")
         convert_file(EOS4E40_CSV, dst)
@@ -346,8 +363,8 @@ class TestConvert:
 # 5. Stack (horizontal)
 # ===========================================================================
 
-class TestStack:
 
+class TestStack:
     def test_stack_mode_a_eosmix(self, tmp, df4e40, df7m30):
         p4 = str(tmp / "eos4e40_v1.csv")
         p7 = str(tmp / "eos7m30_v1.csv")
@@ -445,8 +462,8 @@ class TestStack:
 # 6. Append (vertical)
 # ===========================================================================
 
-class TestAppend:
 
+class TestAppend:
     def _split_half(self, tmp, src_path, model_id):
         """Split src_path into two halves, return their paths."""
         df = pd.read_csv(src_path)
@@ -510,8 +527,8 @@ class TestAppend:
 # 7. Dedupe
 # ===========================================================================
 
-class TestDedupe:
 
+class TestDedupe:
     def test_dedupe_removes_duplicates(self, tmp, df4e40):
         # introduce duplicates
         df_dup = pd.concat([df4e40, df4e40.iloc[:5]], ignore_index=True)
@@ -529,7 +546,9 @@ class TestDedupe:
         assert before == after == EOS4E40_ROWS
 
     def test_dedupe_keeps_first_occurrence(self, tmp, df4e40):
-        df_dup = pd.concat([df4e40, df4e40.iloc[:3].assign(inhibition_50um=99.0)], ignore_index=True)
+        df_dup = pd.concat(
+            [df4e40, df4e40.iloc[:3].assign(inhibition_50um=99.0)], ignore_index=True
+        )
         src = str(tmp / "eos4e40_v1_raw.csv")
         df_dup.to_csv(src, index=False)
         dst = str(tmp / "eos4e40_v1.csv")
@@ -556,11 +575,16 @@ class TestDedupe:
 # 8. Scale — fit_scaler / apply_scaler (DataFrame API)
 # ===========================================================================
 
-class TestScalerDataFrame:
 
+class TestScalerDataFrame:
     def test_fit_scaler_returns_correct_keys(self, df4e40):
         params = fit_scaler(df4e40)
-        assert set(params.keys()) == {"method", "columns", "skipped_columns", "parameters"}
+        assert set(params.keys()) == {
+            "method",
+            "columns",
+            "skipped_columns",
+            "parameters",
+        }
         assert params["method"] == "standard"
         assert params["columns"] == EOS4E40_FEATURES
         assert params["skipped_columns"] == []
@@ -569,7 +593,7 @@ class TestScalerDataFrame:
         params = fit_scaler(df4e40)
         p = params["parameters"]["inhibition_50um"]
         expected_mean = float(df4e40["inhibition_50um"].mean())
-        expected_std  = float(df4e40["inhibition_50um"].std(ddof=0))
+        expected_std = float(df4e40["inhibition_50um"].std(ddof=0))
         assert abs(p["mean"] - expected_mean) < 1e-6
         assert abs(p["std"] - expected_std) < 1e-6
 
@@ -602,23 +626,27 @@ class TestScalerDataFrame:
             apply_scaler(df7m30, params)
 
     def test_fit_scaler_skips_mostly_missing(self):
-        df = pd.DataFrame({
-            "key": ["k0", "k1", "k2", "k3"],
-            "input": ["m0", "m1", "m2", "m3"],
-            "good": [1.0, 2.0, 3.0, 4.0],
-            "bad":  [np.nan, np.nan, np.nan, 1.0],  # 75% missing → skipped
-        })
+        df = pd.DataFrame(
+            {
+                "key": ["k0", "k1", "k2", "k3"],
+                "input": ["m0", "m1", "m2", "m3"],
+                "good": [1.0, 2.0, 3.0, 4.0],
+                "bad": [np.nan, np.nan, np.nan, 1.0],  # 75% missing → skipped
+            }
+        )
         df.model_id = "eos4e40"
         params = fit_scaler(df)
         assert "bad" in params["skipped_columns"]
         assert "good" in params["columns"]
 
     def test_fit_scaler_constant_column(self):
-        df = pd.DataFrame({
-            "key": ["k0", "k1"],
-            "input": ["m0", "m1"],
-            "flat": [1.0, 1.0],
-        })
+        df = pd.DataFrame(
+            {
+                "key": ["k0", "k1"],
+                "input": ["m0", "m1"],
+                "flat": [1.0, 1.0],
+            }
+        )
         df.model_id = "eos4e40"
         params = fit_scaler(df)
         scaled = apply_scaler(df, params)
@@ -630,8 +658,8 @@ class TestScalerDataFrame:
 # 9. Scale — transform_file (file API)
 # ===========================================================================
 
-class TestScalerFile:
 
+class TestScalerFile:
     def test_transform_creates_csv(self, tmp, df4e40):
         src = str(tmp / "eos4e40_v1.csv")
         write_csv(df4e40, src)
@@ -729,7 +757,9 @@ class TestScalerFile:
         bad_named = str(tmp / "bad_eos4e40_v1.csv")
         df_bad.to_csv(bad_named, index=False)
         with pytest.raises(EosframesError, match="Column mismatch"):
-            transform_file(bad_named, output_path=str(tmp / "out.csv"), params=json_path)
+            transform_file(
+                bad_named, output_path=str(tmp / "out.csv"), params=json_path
+            )
 
     def test_transform_forward_pass_output_to_h5(self, tmp, df4e40):
         src = str(tmp / "eos4e40_v1.csv")
@@ -747,7 +777,9 @@ class TestScalerFile:
         write_csv(df4e40, src)
         json_path = str(tmp / "scaler.json")
         out = str(tmp / "scaled.csv")
-        result = _runner().invoke(main, ["transform", src, "--params", json_path, "--fit", "-o", out])
+        result = _runner().invoke(
+            main, ["transform", src, "--params", json_path, "--fit", "-o", out]
+        )
         assert result.exit_code == 0, result.output
         assert os.path.exists(json_path)
         t = json.load(open(json_path))
@@ -758,8 +790,12 @@ class TestScalerFile:
         write_csv(df4e40, src)
         json_path = str(tmp / "scaler.json")
         fit_out = str(tmp / "scaled_fit.csv")
-        _runner().invoke(main, ["transform", src, "--params", json_path, "--fit", "-o", fit_out])
+        _runner().invoke(
+            main, ["transform", src, "--params", json_path, "--fit", "-o", fit_out]
+        )
         out = str(tmp / "scaled_apply.csv")
-        result = _runner().invoke(main, ["transform", src, "--params", json_path, "-o", out])
+        result = _runner().invoke(
+            main, ["transform", src, "--params", json_path, "-o", out]
+        )
         assert result.exit_code == 0, result.output
         assert os.path.exists(out)

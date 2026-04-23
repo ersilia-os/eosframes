@@ -6,10 +6,7 @@ Run with:
 """
 
 import os
-import shutil
-import tempfile
 
-import numpy as np
 import pandas as pd
 import pytest
 from click.testing import CliRunner
@@ -29,10 +26,10 @@ from eosframes.naming import (
     parse_name,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture()
 def tmp(tmp_path):
@@ -42,12 +39,14 @@ def tmp(tmp_path):
 
 def _write_csv(path: str, n_rows: int = 5, model_id: str = "eos4e40") -> None:
     """Write a minimal Ersilia-format CSV to *path*."""
-    df = pd.DataFrame({
-        "key":   [f"k{i}" for i in range(n_rows)],
-        "input": [f"mol{i}" for i in range(n_rows)],
-        "score": [round(i * 0.1, 2) for i in range(n_rows)],
-        "prob":  [round(1 - i * 0.1, 2) for i in range(n_rows)],
-    })
+    df = pd.DataFrame(
+        {
+            "key": [f"k{i}" for i in range(n_rows)],
+            "input": [f"mol{i}" for i in range(n_rows)],
+            "score": [round(i * 0.1, 2) for i in range(n_rows)],
+            "prob": [round(1 - i * 0.1, 2) for i in range(n_rows)],
+        }
+    )
     df.to_csv(path, index=False)
 
 
@@ -55,19 +54,34 @@ def _write_csv(path: str, n_rows: int = 5, model_id: str = "eos4e40") -> None:
 # naming.py
 # ---------------------------------------------------------------------------
 
-class TestNaming:
 
+class TestNaming:
     def test_parse_csv(self):
         r = parse_name("eos4e40_v1.csv")
-        assert r == {"model_id": "eos4e40", "version": "v1", "extension": "csv", "name_type": "csv"}
+        assert r == {
+            "model_id": "eos4e40",
+            "version": "v1",
+            "extension": "csv",
+            "name_type": "csv",
+        }
 
     def test_parse_h5(self):
         r = parse_name("eos4e40_v1.h5")
-        assert r == {"model_id": "eos4e40", "version": "v1", "extension": "h5", "name_type": "h5"}
+        assert r == {
+            "model_id": "eos4e40",
+            "version": "v1",
+            "extension": "h5",
+            "name_type": "h5",
+        }
 
     def test_parse_chunks_dir(self):
         r = parse_name("eos4e40_v1_chunks")
-        assert r == {"model_id": "eos4e40", "version": "v1", "extension": None, "name_type": "chunks_dir"}
+        assert r == {
+            "model_id": "eos4e40",
+            "version": "v1",
+            "extension": None,
+            "name_type": "chunks_dir",
+        }
 
     def test_parse_chunks_dir_trailing_slash(self):
         assert parse_name("eos4e40_v1_chunks/")["name_type"] == "chunks_dir"
@@ -78,7 +92,12 @@ class TestNaming:
 
     def test_parse_with_prefix(self):
         r = parse_name("260313_gardp_eos4e40_v1.csv")
-        assert r == {"model_id": "eos4e40", "version": "v1", "extension": "csv", "name_type": "csv"}
+        assert r == {
+            "model_id": "eos4e40",
+            "version": "v1",
+            "extension": "csv",
+            "name_type": "csv",
+        }
 
     def test_parse_with_prefix_chunks(self):
         r = parse_name("260313_gardp_eos4e40_v1_chunks")
@@ -130,7 +149,12 @@ class TestNaming:
 
     def test_parse_info_csv(self):
         r = parse_name("eos4e40_v1_info.csv")
-        assert r == {"model_id": "eos4e40", "version": "v1", "extension": "csv", "name_type": "info"}
+        assert r == {
+            "model_id": "eos4e40",
+            "version": "v1",
+            "extension": "csv",
+            "name_type": "info",
+        }
 
     def test_parse_info_csv_with_prefix(self):
         r = parse_name("example_eos4e40_v1_info.csv")
@@ -139,10 +163,17 @@ class TestNaming:
 
     def test_parse_columns_csv(self):
         r = parse_name("eos7m30_v2_columns.csv")
-        assert r == {"model_id": "eos7m30", "version": "v2", "extension": "csv", "name_type": "columns"}
+        assert r == {
+            "model_id": "eos7m30",
+            "version": "v2",
+            "extension": "csv",
+            "name_type": "columns",
+        }
 
     def test_parse_columns_csv_with_prefix(self):
-        assert parse_name("260313_gardp_eos4e40_v1_columns.csv")["name_type"] == "columns"
+        assert (
+            parse_name("260313_gardp_eos4e40_v1_columns.csv")["name_type"] == "columns"
+        )
 
     def test_parse_info_h5_rejected(self):
         # Sidecar convention is csv-only.
@@ -171,7 +202,12 @@ class TestNaming:
 
     def test_parse_summary_csv(self):
         r = parse_name("eos4e40_v1_summary.csv")
-        assert r == {"model_id": "eos4e40", "version": "v1", "extension": "csv", "name_type": "summary"}
+        assert r == {
+            "model_id": "eos4e40",
+            "version": "v1",
+            "extension": "csv",
+            "name_type": "summary",
+        }
 
     def test_parse_summary_with_prefix(self):
         assert parse_name("example_eos4e40_v1_summary.csv")["name_type"] == "summary"
@@ -199,7 +235,10 @@ class TestNaming:
         assert make_info_name("eos4e40", "v1") == "eos4e40_v1_info.csv"
 
     def test_make_info_name_with_prefix(self):
-        assert make_info_name("eos4e40", "v1", prefix="example") == "example_eos4e40_v1_info.csv"
+        assert (
+            make_info_name("eos4e40", "v1", prefix="example")
+            == "example_eos4e40_v1_info.csv"
+        )
 
     def test_make_columns_name_no_prefix(self):
         assert make_columns_name("eos7m30", "v2") == "eos7m30_v2_columns.csv"
@@ -227,8 +266,8 @@ class TestNaming:
 # CLI: info
 # ---------------------------------------------------------------------------
 
-class TestInfoCLI:
 
+class TestInfoCLI:
     @pytest.fixture()
     def fake_metadata(self, monkeypatch):
         """Stub hub.fetch_metadata to return a deterministic payload."""
@@ -314,17 +353,21 @@ class TestInfoCLI:
 # CLI: columns
 # ---------------------------------------------------------------------------
 
-class TestColumnsCLI:
 
+class TestColumnsCLI:
     @pytest.fixture()
     def fake_columns(self, monkeypatch):
         """Stub hub.fetch_columns to return a small DataFrame."""
-        df = pd.DataFrame({
-            "name":        ["inhibition_50um"],
-            "type":        ["float"],
-            "direction":   ["high"],
-            "description": ["Probability of inhibiting the growth of E.coli at 50 uM"],
-        })
+        df = pd.DataFrame(
+            {
+                "name": ["inhibition_50um"],
+                "type": ["float"],
+                "direction": ["high"],
+                "description": [
+                    "Probability of inhibiting the growth of E.coli at 50 uM"
+                ],
+            }
+        )
         monkeypatch.setattr(
             "eosframes.hub.fetch_columns",
             lambda model_id, version: df.copy(),
@@ -377,8 +420,8 @@ class TestColumnsCLI:
 # CLI: split
 # ---------------------------------------------------------------------------
 
-class TestSplit:
 
+class TestSplit:
     def test_basic(self, tmp):
         src = str(tmp / "input.csv")
         _write_csv(src, n_rows=10)
@@ -387,7 +430,7 @@ class TestSplit:
         result = CliRunner().invoke(main, ["split", src, "-o", out, "--chunksize", "3"])
         assert result.exit_code == 0, result.output
         files = sorted(os.listdir(out))
-        assert len(files) == 4   # ceil(10/3) = 4
+        assert len(files) == 4  # ceil(10/3) = 4
         assert files[0] == "chunk_000.csv"
 
     def test_zfill_3_digit(self, tmp):
@@ -397,7 +440,9 @@ class TestSplit:
         CliRunner().invoke(main, ["split", src, "-o", out, "--chunksize", "1"])
         files = os.listdir(out)
         # 5 chunks → 3-digit padding
-        assert all(f.startswith("chunk_") and len(f) == 13 for f in files)  # chunk_000.csv
+        assert all(
+            f.startswith("chunk_") and len(f) == 13 for f in files
+        )  # chunk_000.csv
 
     def test_output_folder_exists_error(self, tmp):
         src = str(tmp / "input.csv")
@@ -413,9 +458,7 @@ class TestSplit:
         _write_csv(src, n_rows=7)
         out = str(tmp / "chunks")
         CliRunner().invoke(main, ["split", src, "-o", out, "--chunksize", "3"])
-        total = sum(
-            len(pd.read_csv(os.path.join(out, f))) for f in os.listdir(out)
-        )
+        total = sum(len(pd.read_csv(os.path.join(out, f))) for f in os.listdir(out))
         assert total == 7
 
 
@@ -423,8 +466,8 @@ class TestSplit:
 # CLI: convert
 # ---------------------------------------------------------------------------
 
-class TestConvert:
 
+class TestConvert:
     def test_csv_to_h5(self, tmp):
         src = str(tmp / "eos4e40_v1.csv")
         dst = str(tmp / "eos4e40_v1.h5")
@@ -457,7 +500,9 @@ class TestConvert:
     def test_bad_output_name_error(self, tmp):
         src = str(tmp / "eos4e40_v1.csv")
         _write_csv(src)
-        result = CliRunner().invoke(main, ["convert", src, "-o", str(tmp / "output.h5")])
+        result = CliRunner().invoke(
+            main, ["convert", src, "-o", str(tmp / "output.h5")]
+        )
         assert result.exit_code != 0
         assert "naming convention" in result.output
 
@@ -466,17 +511,19 @@ class TestConvert:
 # CLI: stack
 # ---------------------------------------------------------------------------
 
-class TestStack:
 
+class TestStack:
     def _two_files(self, tmp):
         f1 = str(tmp / "eos4e40_v1.csv")
         f2 = str(tmp / "eos3804_v1.csv")
         for path, col in [(f1, "score"), (f2, "activity")]:
-            pd.DataFrame({
-                "key":   ["k0", "k1", "k2"],
-                "input": ["mol0", "mol1", "mol2"],
-                col:     [0.1, 0.2, 0.3],
-            }).to_csv(path, index=False)
+            pd.DataFrame(
+                {
+                    "key": ["k0", "k1", "k2"],
+                    "input": ["mol0", "mol1", "mol2"],
+                    col: [0.1, 0.2, 0.3],
+                }
+            ).to_csv(path, index=False)
         return f1, f2
 
     # --- Mode A (eosmix) ---
@@ -543,13 +590,20 @@ class TestStack:
         out = str(tmp / "project_eosmix.csv")
         result = CliRunner().invoke(main, ["stack", f1, f1, "-o", out])
         assert result.exit_code != 0
-        assert "Duplicate" in result.output or "appears more than once" in result.output.lower()
+        assert (
+            "Duplicate" in result.output
+            or "appears more than once" in result.output.lower()
+        )
 
     def test_input_mismatch_error(self, tmp):
         f1 = str(tmp / "eos4e40_v1.csv")
         f2 = str(tmp / "eos3804_v1.csv")
-        pd.DataFrame({"key": ["k0"], "input": ["mol0"], "score": [0.1]}).to_csv(f1, index=False)
-        pd.DataFrame({"key": ["k1"], "input": ["mol1"], "score": [0.2]}).to_csv(f2, index=False)
+        pd.DataFrame({"key": ["k0"], "input": ["mol0"], "score": [0.1]}).to_csv(
+            f1, index=False
+        )
+        pd.DataFrame({"key": ["k1"], "input": ["mol1"], "score": [0.2]}).to_csv(
+            f2, index=False
+        )
         out = str(tmp / "eosmix.csv")
         result = CliRunner().invoke(main, ["stack", f1, f2, "-o", out])
         assert result.exit_code != 0
@@ -560,21 +614,25 @@ class TestStack:
 # CLI: unstack
 # ---------------------------------------------------------------------------
 
-class TestUnstack:
 
+class TestUnstack:
     def _two_model_files(self, tmp):
         f1 = str(tmp / "eos4e40_v1.csv")
         f2 = str(tmp / "eos3804_v1.csv")
-        pd.DataFrame({
-            "key":   ["k0", "k1", "k2"],
-            "input": ["mol0", "mol1", "mol2"],
-            "score": [0.1, 0.2, 0.3],
-        }).to_csv(f1, index=False)
-        pd.DataFrame({
-            "key":      ["k0", "k1", "k2"],
-            "input":    ["mol0", "mol1", "mol2"],
-            "activity": [1.0, 2.0, 3.0],
-        }).to_csv(f2, index=False)
+        pd.DataFrame(
+            {
+                "key": ["k0", "k1", "k2"],
+                "input": ["mol0", "mol1", "mol2"],
+                "score": [0.1, 0.2, 0.3],
+            }
+        ).to_csv(f1, index=False)
+        pd.DataFrame(
+            {
+                "key": ["k0", "k1", "k2"],
+                "input": ["mol0", "mol1", "mol2"],
+                "activity": [1.0, 2.0, 3.0],
+            }
+        ).to_csv(f2, index=False)
         return f1, f2
 
     def test_mode_a_round_trip(self, tmp):
@@ -616,6 +674,7 @@ class TestUnstack:
         def fake_fetch(model_id, version):
             cols = {"eos4e40": ["score"], "eos3804": ["activity"]}[model_id]
             return pd.DataFrame({"name": cols})
+
         monkeypatch.setattr("eosframes.hub.fetch_columns", fake_fetch)
 
         out_folder = str(tmp / "split_b")
@@ -635,6 +694,7 @@ class TestUnstack:
         # the stacked file has a 'score' column that can't be assigned.
         def fake_fetch(model_id, version):
             return pd.DataFrame({"name": ["score", "activity"]})
+
         monkeypatch.setattr("eosframes.hub.fetch_columns", fake_fetch)
 
         out_folder = str(tmp / "split_ambig")
@@ -644,7 +704,9 @@ class TestUnstack:
 
     def test_invalid_input_name(self, tmp):
         bogus = str(tmp / "not_a_stack.csv")
-        pd.DataFrame({"key": ["k0"], "input": ["m0"], "x": [1]}).to_csv(bogus, index=False)
+        pd.DataFrame({"key": ["k0"], "input": ["m0"], "x": [1]}).to_csv(
+            bogus, index=False
+        )
         out_folder = str(tmp / "split_bad")
         r = CliRunner().invoke(main, ["unstack", bogus, "-o", out_folder])
         assert r.exit_code != 0
@@ -665,8 +727,8 @@ class TestUnstack:
 # CLI: append
 # ---------------------------------------------------------------------------
 
-class TestAppend:
 
+class TestAppend:
     def test_basic(self, tmp):
         b1 = str(tmp / "eos4e40_v1_batch1.csv")
         b2 = str(tmp / "eos4e40_v1_batch2.csv")
@@ -680,8 +742,12 @@ class TestAppend:
     def test_order_preserved(self, tmp):
         b1 = str(tmp / "eos4e40_v1_b1.csv")
         b2 = str(tmp / "eos4e40_v1_b2.csv")
-        pd.DataFrame({"key": ["k0", "k1"], "input": ["m0", "m1"], "score": [1.0, 2.0]}).to_csv(b1, index=False)
-        pd.DataFrame({"key": ["k2", "k3"], "input": ["m2", "m3"], "score": [3.0, 4.0]}).to_csv(b2, index=False)
+        pd.DataFrame(
+            {"key": ["k0", "k1"], "input": ["m0", "m1"], "score": [1.0, 2.0]}
+        ).to_csv(b1, index=False)
+        pd.DataFrame(
+            {"key": ["k2", "k3"], "input": ["m2", "m3"], "score": [3.0, 4.0]}
+        ).to_csv(b2, index=False)
         out = str(tmp / "eos4e40_v1.csv")
         CliRunner().invoke(main, ["append", b1, b2, "-o", out])
         df = pd.read_csv(out)
@@ -700,8 +766,12 @@ class TestAppend:
     def test_column_mismatch_error(self, tmp):
         b1 = str(tmp / "eos4e40_v1_b1.csv")
         b2 = str(tmp / "eos4e40_v1_b2.csv")
-        pd.DataFrame({"key": ["k0"], "input": ["m0"], "score": [1.0]}).to_csv(b1, index=False)
-        pd.DataFrame({"key": ["k1"], "input": ["m1"], "other": [2.0]}).to_csv(b2, index=False)
+        pd.DataFrame({"key": ["k0"], "input": ["m0"], "score": [1.0]}).to_csv(
+            b1, index=False
+        )
+        pd.DataFrame({"key": ["k1"], "input": ["m1"], "other": [2.0]}).to_csv(
+            b2, index=False
+        )
         out = str(tmp / "eos4e40_v1.csv")
         result = CliRunner().invoke(main, ["append", b1, b2, "-o", out])
         assert result.exit_code != 0
@@ -712,15 +782,17 @@ class TestAppend:
 # CLI: dedupe
 # ---------------------------------------------------------------------------
 
-class TestDedupe:
 
+class TestDedupe:
     def test_removes_duplicates(self, tmp):
         src = str(tmp / "eos4e40_v1_raw.csv")
-        pd.DataFrame({
-            "key":   ["k0", "k1", "k0", "k2", "k1"],
-            "input": ["m0", "m1", "m0", "m2", "m1"],
-            "score": [1.0, 2.0, 3.0, 4.0, 5.0],
-        }).to_csv(src, index=False)
+        pd.DataFrame(
+            {
+                "key": ["k0", "k1", "k0", "k2", "k1"],
+                "input": ["m0", "m1", "m0", "m2", "m1"],
+                "score": [1.0, 2.0, 3.0, 4.0, 5.0],
+            }
+        ).to_csv(src, index=False)
         dst = str(tmp / "eos4e40_v1.csv")
         result = CliRunner().invoke(main, ["dedupe", src, "-o", dst])
         assert result.exit_code == 0, result.output
@@ -749,12 +821,17 @@ class TestDedupe:
 # CLI: summary
 # ---------------------------------------------------------------------------
 
-class TestSummary:
 
-    def _write_eos4e40(self, path: str, keys, scores=None, with_key: bool = True) -> None:
+class TestSummary:
+    def _write_eos4e40(
+        self, path: str, keys, scores=None, with_key: bool = True
+    ) -> None:
         """Write a minimal Ersilia-format CSV with configurable keys."""
         n = len(keys)
-        data = {"input": [f"mol{i}" for i in range(n)], "score": scores or [0.1 * i for i in range(n)]}
+        data = {
+            "input": [f"mol{i}" for i in range(n)],
+            "score": scores or [0.1 * i for i in range(n)],
+        }
         if with_key:
             data = {"key": list(keys), **data}
         pd.DataFrame(data).to_csv(path, index=False)
@@ -786,11 +863,13 @@ class TestSummary:
 
     def test_missing_data_flag(self, tmp):
         src = str(tmp / "eos4e40_v1.csv")
-        pd.DataFrame({
-            "key":   ["k0", "k1", "k2"],
-            "input": ["m0", "m1", "m2"],
-            "score": [1.0, None, 3.0],
-        }).to_csv(src, index=False)
+        pd.DataFrame(
+            {
+                "key": ["k0", "k1", "k2"],
+                "input": ["m0", "m1", "m2"],
+                "score": [1.0, None, 3.0],
+            }
+        ).to_csv(src, index=False)
         result = CliRunner().invoke(main, ["summary", src])
         assert result.exit_code == 0, result.output
         assert "Missing data:" in result.output
@@ -811,7 +890,9 @@ class TestSummary:
     def test_write_sidecar_bad_suffix(self, tmp):
         src = str(tmp / "eos4e40_v1.csv")
         self._write_eos4e40(src, keys=["k0", "k1"])
-        result = CliRunner().invoke(main, ["summary", src, "-o", str(tmp / "bogus.csv")])
+        result = CliRunner().invoke(
+            main, ["summary", src, "-o", str(tmp / "bogus.csv")]
+        )
         assert result.exit_code != 0
         assert "_summary" in result.output
         assert "eos4e40_v1_summary.csv" in result.output

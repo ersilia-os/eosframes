@@ -254,7 +254,9 @@ def _make_sidecar_name(
         raise ValueError(f"Invalid model_id: {model_id!r}")
     if not re.match(r"^v\d+$", version):
         raise ValueError(f"Invalid version: {version!r}. Expected format: v1, v2, ...")
-    if prefix is not None and not re.fullmatch(r"[A-Za-z0-9]+(?:_[A-Za-z0-9]+)*", prefix):
+    if prefix is not None and not re.fullmatch(
+        r"[A-Za-z0-9]+(?:_[A-Za-z0-9]+)*", prefix
+    ):
         raise ValueError(
             f"Invalid prefix: {prefix!r}. Must be alphanumeric tokens joined by underscores."
         )
@@ -262,9 +264,7 @@ def _make_sidecar_name(
     return f"{prefix}_{stem}.csv" if prefix else f"{stem}.csv"
 
 
-def make_info_name(
-    model_id: str, version: str, prefix: Optional[str] = None
-) -> str:
+def make_info_name(model_id: str, version: str, prefix: Optional[str] = None) -> str:
     """Build a canonical info-sidecar filename.
 
     Returns
@@ -280,9 +280,7 @@ def make_info_name(
     return _make_sidecar_name(model_id, version, "info", prefix)
 
 
-def make_columns_name(
-    model_id: str, version: str, prefix: Optional[str] = None
-) -> str:
+def make_columns_name(model_id: str, version: str, prefix: Optional[str] = None) -> str:
     """Build a canonical columns-sidecar filename.
 
     Returns
@@ -298,9 +296,7 @@ def make_columns_name(
     return _make_sidecar_name(model_id, version, "columns", prefix)
 
 
-def make_summary_name(
-    model_id: str, version: str, prefix: Optional[str] = None
-) -> str:
+def make_summary_name(model_id: str, version: str, prefix: Optional[str] = None) -> str:
     """Build a canonical summary-sidecar filename.
 
     Returns

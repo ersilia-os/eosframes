@@ -362,7 +362,9 @@ def summary(input_file: str, output: str) -> None:
     # Resolve filename-based metadata (model_id, version) — required for the
     # -o naming-convention check and surfaced in the header block.
     parsed_in = parse_name(input_file)
-    resolved_out = _resolve_sidecar_output(output, parsed_in, "summary") if parsed_in else None
+    resolved_out = (
+        _resolve_sidecar_output(output, parsed_in, "summary") if parsed_in else None
+    )
     if output is not None and parsed_in is None:
         # -o given but input filename doesn't follow the convention — we
         # can't validate/build a matching sidecar name. Reject explicitly.
@@ -375,7 +377,9 @@ def summary(input_file: str, output: str) -> None:
 
     meta_cols = [c for c in ("key", "input") if c in df.columns]
     feature_cols = [c for c in df.columns if c not in {"key", "input"}]
-    uniq_col = "key" if "key" in df.columns else ("input" if "input" in df.columns else None)
+    uniq_col = (
+        "key" if "key" in df.columns else ("input" if "input" in df.columns else None)
+    )
 
     # Compute per-feature stats once — reused by pretty-print and CSV output.
     def _fmt(v: float) -> str:
@@ -477,9 +481,7 @@ def summary(input_file: str, output: str) -> None:
             min_s = "[dim]—[/dim]"
             mean_s = f"[dim]{n_unique} unique[/dim]"
             max_s = "[dim]—[/dim]"
-        table.add_row(
-            row["column"], row["dtype"], missing_str, min_s, mean_s, max_s
-        )
+        table.add_row(row["column"], row["dtype"], missing_str, min_s, mean_s, max_s)
 
     console.print(table)
 
@@ -628,9 +630,7 @@ def columns(input_file: str, output: str) -> None:
             no_wrap=(col == "name"),
         )
     for _, row in df.iterrows():
-        table.add_row(
-            *(str(v) if pd.notna(v) else "[dim]—[/dim]" for v in row)
-        )
+        table.add_row(*(str(v) if pd.notna(v) else "[dim]—[/dim]" for v in row))
     console.print(table)
 
     if resolved_out is not None:

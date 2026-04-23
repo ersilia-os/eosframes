@@ -386,7 +386,9 @@ def dedupe_file(input_path: str, output_path: str) -> Tuple[int, int]:
 
 # Matches an eosmix column suffix at the END of a name:
 #   "<original>_<model_id>_<version>" where model_id = eos<d><3 alnum>, version = v<digits>
-_EOSMIX_COL_RE = re.compile(r"^(?P<original>.+)_(?P<model_id>eos\d[A-Za-z0-9]{3})_(?P<version>v\d+)$")
+_EOSMIX_COL_RE = re.compile(
+    r"^(?P<original>.+)_(?P<model_id>eos\d[A-Za-z0-9]{3})_(?P<version>v\d+)$"
+)
 
 
 def _classify_stack_columns_mode_a(
@@ -404,7 +406,9 @@ def _classify_stack_columns_mode_a(
         if not m or not is_model_id_valid(m.group("model_id")):
             bad.append(col)
             continue
-        parsed.append((m.group("original"), m.group("model_id"), m.group("version"), col))
+        parsed.append(
+            (m.group("original"), m.group("model_id"), m.group("version"), col)
+        )
     if bad:
         raise EosframesError(
             "Some feature columns do not follow the Mode A suffix pattern "
@@ -447,7 +451,11 @@ def _classify_stack_columns_mode_b(
     for (model_id, version), cols in model_cols:
         for c in cols:
             column_owners.setdefault(c, []).append((model_id, version))
-    ambiguous = {c: owners for c, owners in column_owners.items() if len(owners) > 1 and c in feat_set}
+    ambiguous = {
+        c: owners
+        for c, owners in column_owners.items()
+        if len(owners) > 1 and c in feat_set
+    }
     if ambiguous:
         msg_lines = [f"  {c!r}: {owners}" for c, owners in list(ambiguous.items())[:5]]
         raise EosframesError(
@@ -458,7 +466,8 @@ def _classify_stack_columns_mode_b(
     if unmatched:
         raise EosframesError(
             "Unmatched feature columns — none of the stacked models' "
-            "run_columns.csv lists these:\n  " + ", ".join(unmatched[:10])
+            "run_columns.csv lists these:\n  "
+            + ", ".join(unmatched[:10])
             + (" ..." if len(unmatched) > 10 else "")
         )
 
@@ -561,7 +570,9 @@ def unstack_file(input_path: str, output_folder: str) -> List[str]:
     assignments: List[Tuple[str, str, str, str]]
     if mode == "eosmix":
         parsed = _classify_stack_columns_mode_a(feature_cols)
-        assignments = [(stacked, mid, ver, original) for original, mid, ver, stacked in parsed]
+        assignments = [
+            (stacked, mid, ver, original) for original, mid, ver, stacked in parsed
+        ]
     else:
         pairs = explicit["models"]
         mode_b = _classify_stack_columns_mode_b(feature_cols, pairs)
@@ -581,7 +592,7 @@ def unstack_file(input_path: str, output_folder: str) -> List[str]:
     # Create the destination folder and write each per-model CSV.
     os.makedirs(output_folder)
     written: List[str] = []
-    for (model_id, version) in order:
+    for model_id, version in order:
         cols = per_model[(model_id, version)]
         stacked_names = [s for s, _ in cols]
         output_names = [o for _, o in cols]
@@ -591,13 +602,18 @@ def unstack_file(input_path: str, output_folder: str) -> List[str]:
         sub.model_id = model_id
         sub.version = version
         out_basename = (
-            f"{prefix}_{model_id}_{version}.csv" if prefix else f"{model_id}_{version}.csv"
+            f"{prefix}_{model_id}_{version}.csv"
+            if prefix
+            else f"{model_id}_{version}.csv"
         )
         out_path = os.path.abspath(os.path.join(output_folder, out_basename))
         write_csv(sub, out_path)
         written.append(out_path)
 
     logger.info(
-        "Unstacked %s → %d per-model files in %s", input_path, len(written), output_folder
+        "Unstacked %s → %d per-model files in %s",
+        input_path,
+        len(written),
+        output_folder,
     )
     return written
