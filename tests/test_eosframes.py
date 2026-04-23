@@ -248,7 +248,7 @@ class TestReadWrite:
 
     def test_write_csv_no_naming_convention_raises(self, tmp, df4e40):
         path = str(tmp / "output.csv")
-        with pytest.raises(Exception):
+        with pytest.raises(EosframesError):
             write_csv(df4e40, path)
 
 
@@ -678,7 +678,8 @@ class TestScalerFile:
         write_csv(df4e40, src)
         json_path = str(tmp / "scaler.json")
         transform_file(src, params=json_path, fit=True)
-        t = json.load(open(json_path))
+        with open(json_path) as fh:
+            t = json.load(fh)
         assert t["model_id"] == "eos4e40"
         assert t["version"] == "v1"
         assert t["n_rows"] == EOS4E40_ROWS
@@ -699,7 +700,8 @@ class TestScalerFile:
         write_csv(df7m30, src)
         json_path = str(tmp / "scaler.json")
         transform_file(src, params=json_path, fit=True)
-        t = json.load(open(json_path))
+        with open(json_path) as fh:
+            t = json.load(fh)
         assert t["model_id"] == "eos7m30"
         assert t["n_rows"] == EOS7M30_ROWS
         assert len(t["columns"]) == EOS7M30_N_FEATURES
@@ -782,7 +784,8 @@ class TestScalerFile:
         )
         assert result.exit_code == 0, result.output
         assert os.path.exists(json_path)
-        t = json.load(open(json_path))
+        with open(json_path) as fh:
+            t = json.load(fh)
         assert t["model_id"] == "eos4e40"
 
     def test_cli_transform_forward_pass(self, tmp, df4e40):
