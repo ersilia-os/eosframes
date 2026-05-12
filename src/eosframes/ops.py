@@ -76,9 +76,7 @@ def _require_no_overwrite(path: str, *, kind: str = "file") -> None:
             f"Output folder '{path}' already exists. "
             "Remove it or choose a different name."
         )
-    raise EosframesError(
-        f"Output file '{path}' already exists. Remove it first."
-    )
+    raise EosframesError(f"Output file '{path}' already exists. Remove it first.")
 
 
 def _compute_summary_stats(df: pd.DataFrame) -> List[Dict]:

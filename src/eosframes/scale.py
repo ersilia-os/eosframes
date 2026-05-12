@@ -309,9 +309,7 @@ _COUNT_SHIFTED_EXTENT_RATIO_MAX = 2.0
 _PIECEWISE_BLEND_FRACTION = 0.5
 
 
-def _tanh_tail(
-    mag: np.ndarray, body_extent: float, body_target: float
-) -> np.ndarray:
+def _tanh_tail(mag: np.ndarray, body_extent: float, body_target: float) -> np.ndarray:
     """Asymptotic tail for ``|x - center| > body_extent``.
 
     Returns ``y = body_target + (1 − body_target)·tanh(c·u)`` for
@@ -596,12 +594,10 @@ def _fit_continuous(series: pd.Series) -> dict:
     tail_asymmetry_right = right_span / max(left_span, _eps)
     tail_asymmetry_left = left_span / max(right_span, _eps)
     is_right_skew = (
-        bowley > _BOWLEY_THRESHOLD
-        and tail_asymmetry_right > _TAIL_ASYMMETRY_THRESHOLD
+        bowley > _BOWLEY_THRESHOLD and tail_asymmetry_right > _TAIL_ASYMMETRY_THRESHOLD
     )
     is_left_skew = (
-        bowley < -_BOWLEY_THRESHOLD
-        and tail_asymmetry_left > _TAIL_ASYMMETRY_THRESHOLD
+        bowley < -_BOWLEY_THRESHOLD and tail_asymmetry_left > _TAIL_ASYMMETRY_THRESHOLD
     )
 
     if is_right_skew:
@@ -889,9 +885,7 @@ def _apply_constant(
     return _to_output_array(out, output_dtype)
 
 
-def _apply_binary(
-    series: pd.Series, transform: dict, output_dtype: str
-) -> np.ndarray:
+def _apply_binary(series: pd.Series, transform: dict, output_dtype: str) -> np.ndarray:
     low = float(transform["low"])
     high = float(transform["high"])
     arr = series.to_numpy(dtype=float)
@@ -1123,9 +1117,7 @@ def _apply_continuous_left(
         else:  # "finite"
             low = float(transform["low_anchor"])
             max_extent = high - low
-            out[tail_mask] = -_quadratic_tail(
-                mag, body_span, body_target, max_extent
-            )
+            out[tail_mask] = -_quadratic_tail(mag, body_span, body_target, max_extent)
 
     # Cubic Hermite blend across the body→middle junction (mirror of
     # the right-skew blend).
@@ -1193,7 +1185,9 @@ def _apply_continuous_centered(
     nan = np.isnan(arr)
     out = np.full(arr.shape, np.nan, dtype=float)
 
-    def _side(mask: np.ndarray, body_extent: float, max_extent: float, sign: float) -> None:
+    def _side(
+        mask: np.ndarray, body_extent: float, max_extent: float, sign: float
+    ) -> None:
         if not mask.any():
             return
         if body_extent <= 0:
@@ -1383,8 +1377,7 @@ def transform(
     """
     if output_dtype not in _VALID_OUTPUT_DTYPES:
         raise EosframesError(
-            f"Unknown output_dtype '{output_dtype}'. "
-            f"Supported: {_VALID_OUTPUT_DTYPES}"
+            f"Unknown output_dtype '{output_dtype}'. Supported: {_VALID_OUTPUT_DTYPES}"
         )
 
     expected_feature_cols = list(params["columns"].keys())
@@ -1439,9 +1432,7 @@ def _write_df(
                     "input", data=df["input"].astype(str).tolist(), dtype=dt
                 )
             f.create_dataset("features", data=feat_cols, dtype=dt)
-            f.create_dataset(
-                "values", data=df[feat_cols].values, dtype=values_dtype
-            )
+            f.create_dataset("values", data=df[feat_cols].values, dtype=values_dtype)
     else:
         raise EosframesError(f"Unsupported output format '{ext}'. Expected .csv or .h5")
 
@@ -1546,14 +1537,11 @@ def fit_file(
 
     if output_dtype not in _VALID_OUTPUT_DTYPES:
         raise EosframesError(
-            f"Unknown output_dtype '{output_dtype}'. "
-            f"Supported: {_VALID_OUTPUT_DTYPES}"
+            f"Unknown output_dtype '{output_dtype}'. Supported: {_VALID_OUTPUT_DTYPES}"
         )
 
     mode_label = "fit + transform" if output_path is not None else "fit only"
-    logger.info(
-        "%s — reading %d rows from %s", mode_label, len(df), input_path
-    )
+    logger.info("%s — reading %d rows from %s", mode_label, len(df), input_path)
     fitted = fit(df)
 
     transformer = {
@@ -1575,9 +1563,7 @@ def fit_file(
             output_dtype,
             impute,
         )
-        scaled_df = transform(
-            df, transformer, output_dtype=output_dtype, impute=impute
-        )
+        scaled_df = transform(df, transformer, output_dtype=output_dtype, impute=impute)
         _write_df(
             scaled_df,
             output_path,
@@ -1673,8 +1659,7 @@ def transform_file(
 
     if output_dtype not in _VALID_OUTPUT_DTYPES:
         raise EosframesError(
-            f"Unknown output_dtype '{output_dtype}'. "
-            f"Supported: {_VALID_OUTPUT_DTYPES}"
+            f"Unknown output_dtype '{output_dtype}'. Supported: {_VALID_OUTPUT_DTYPES}"
         )
 
     t_model_id = transformer.get("model_id")
@@ -1704,9 +1689,7 @@ def transform_file(
         output_dtype,
         impute,
     )
-    scaled_df = transform(
-        df, transformer, output_dtype=output_dtype, impute=impute
-    )
+    scaled_df = transform(df, transformer, output_dtype=output_dtype, impute=impute)
 
     _write_df(scaled_df, output_path, values_dtype=_values_dtype_for(output_dtype))
     logger.info("Scaled output written to %s", output_path)

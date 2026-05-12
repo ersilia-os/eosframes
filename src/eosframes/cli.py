@@ -186,9 +186,7 @@ def _render_sidecar(
         click.echo(resolved_out)
 
 
-def _fetch_or_clickfail(
-    fetch: Callable, *args, **kwargs
-):
+def _fetch_or_clickfail(fetch: Callable, *args, **kwargs):
     """Call a hub fetcher and convert ``EosframesError`` to ``ClickException``."""
     try:
         return fetch(*args, **kwargs)
@@ -664,7 +662,9 @@ def columns(input_file: str, output: str) -> None:
         "transform time."
     ),
 )
-def fit(input_file: str, scaler: str, output: str, quantize: bool, impute: bool) -> None:
+def fit(
+    input_file: str, scaler: str, output: str, quantize: bool, impute: bool
+) -> None:
     """Fit a type-aware robust scaler on INPUT_FILE and save parameters to SCALER.
 
     Each numeric feature column is auto-classified (constant, binary, count,
@@ -744,7 +744,9 @@ def fit(input_file: str, scaler: str, output: str, quantize: bool, impute: bool)
         "no -128 sentinels)."
     ),
 )
-def transform(input_file: str, scaler: str, output: str, quantize: bool, impute: bool) -> None:
+def transform(
+    input_file: str, scaler: str, output: str, quantize: bool, impute: bool
+) -> None:
     """Apply a saved scaler to INPUT_FILE and write scaled data to OUTPUT.
 
     Loads the scaler parameters from SCALER and applies them to the numeric
