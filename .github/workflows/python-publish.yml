@@ -15,6 +15,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -24,24 +26,12 @@ jobs:
       - name: Install Poetry
         uses: abatilo/actions-poetry@v4.0.0
 
-      - name: Determine version
-        id: get_version
-        run: |
-          if [ "${{ github.event_name }}" = "release" ]; then
-            VERSION="${GITHUB_REF_NAME#v}"
-          else
-            VERSION=$(poetry version -s)
-          fi
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Publishing version $VERSION"
+      - name: Install poetry-dynamic-versioning plugin
+        run: poetry self add "poetry-dynamic-versioning[plugin]"
 
       - name: Configure PyPI credentials
         run: |
           poetry config pypi-token.pypi "${{ secrets.ALL_PYPI_PROJECTS_API_TOKEN }}"
 
       - name: Build and publish to PyPI
-        env:
-          VERSION: ${{ steps.get_version.outputs.version }}
-        run: |
-          poetry version $VERSION
-          poetry publish --build
+        run: poetry publish --build
