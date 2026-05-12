@@ -1,36 +1,57 @@
-"""Readers for Ersilia output files (CSV, H5, chunked CSVs)."""
+"""Readers for Ersilia output files (CSV, H5, chunked CSVs).
+
+Every reader in this module:
+
+* Extracts the model ID from the filename via
+  :func:`eosframes.naming.get_model_id_from_path` (lenient — the
+  ``_v<N>`` token is not strictly required on inputs).
+* Attaches the model ID as ``df.model_id`` and the version as
+  ``df.version`` (``None`` when no version token is present).
+* Validates the file structure: ``key`` / ``input`` columns for CSV,
+  ``values`` / ``features`` / ``input`` datasets for HDF5.
+
+The attached attributes are the foundation of the library's downstream
+contract — :func:`eosframes.write.write_csv`, :func:`eosframes.hstack`,
+and other operations rely on them. See ``CLAUDE.md`` for the full
+``model_id`` attribute contract.
+"""
 
 import os
 
 import h5py
 import pandas as pd
 
-from ..exceptions import EosframesError
-from ..logger import get_logger
-from ..naming import get_model_id_from_path, get_version_from_path
+from .exceptions import EosframesError
+from .logger import get_logger
+from .naming import get_model_id_from_path, get_version_from_path
 
 
 def read_csv(file_path: str) -> pd.DataFrame:
     """Read an Ersilia-format CSV file into a DataFrame.
 
     The file is expected to have at least ``key`` and ``input`` columns
-    followed by one or more feature columns. The model ID is extracted
-    from the filename and attached as ``df.model_id``.
+    followed by one or more feature columns. The model ID and version
+    are extracted from the filename and attached as ``df.model_id`` and
+    ``df.version`` (the latter is ``None`` if the filename has no
+    ``_v<N>`` token).
 
     Parameters
     ----------
     file_path : str
-        Path to the CSV file.
+        Path to the CSV file. Must contain a recognisable model ID in
+        its basename.
 
     Returns
     -------
-    pd.DataFrame
+    pandas.DataFrame
+        With ``df.model_id`` and ``df.version`` attached as loose
+        attributes.
 
     Raises
     ------
     EosframesError
         If the file does not exist, has no recognisable model ID in its
-        name, or is missing required columns.
+        name, or is missing the required ``key`` / ``input`` columns.
     """
     logger = get_logger()
     if not os.path.exists(file_path):
@@ -39,7 +60,7 @@ def read_csv(file_path: str) -> pd.DataFrame:
     if model_id is None:
         raise EosframesError(
             f"Could not extract a model ID from filename '{file_path}'. "
-            "The filename must contain an Ersilia model identifier (e.g. eos4e40)."
+            "The filename must contain an Ersilia model identifier matching the pattern eos<digit><3 alnum>."
         )
     logger.info("Reading CSV: %s", file_path)
     df = pd.read_csv(file_path)
@@ -57,23 +78,34 @@ def read_csv(file_path: str) -> pd.DataFrame:
 def read_h5(h5_path: str) -> pd.DataFrame:
     """Read an Ersilia-format HDF5 file into a DataFrame.
 
-    Expected datasets: ``values`` (N×F float), ``features`` (F strings),
-    ``input`` (N strings), and optionally ``key`` (N strings).
+    Expected datasets:
+
+    * ``values``   — ``(N, F)`` float values
+    * ``features`` — ``(F,)`` UTF-8 feature column names
+    * ``input``    — ``(N,)`` UTF-8 input strings (e.g. SMILES)
+    * ``key``      — ``(N,)`` UTF-8 keys (optional)
+
+    The model ID and version are extracted from the filename and
+    attached as ``df.model_id`` and ``df.version``.
 
     Parameters
     ----------
     h5_path : str
-        Path to the HDF5 file.
+        Path to the HDF5 file. Must contain a recognisable model ID in
+        its basename.
 
     Returns
     -------
-    pd.DataFrame
+    pandas.DataFrame
+        With ``df.model_id`` and ``df.version`` attached as loose
+        attributes.
 
     Raises
     ------
     EosframesError
         If the file does not exist, has no recognisable model ID, or is
-        missing the ``values`` dataset.
+        missing the required ``values`` / ``features`` / ``input``
+        datasets.
     """
     logger = get_logger()
     if not os.path.exists(h5_path):
@@ -82,7 +114,7 @@ def read_h5(h5_path: str) -> pd.DataFrame:
     if model_id is None:
         raise EosframesError(
             f"Could not extract a model ID from filename '{h5_path}'. "
-            "The filename must contain an Ersilia model identifier (e.g. eos4e40)."
+            "The filename must contain an Ersilia model identifier matching the pattern eos<digit><3 alnum>."
         )
     logger.info("Reading H5: %s", h5_path)
     with h5py.File(h5_path, "r") as f:
@@ -106,9 +138,11 @@ def read_h5(h5_path: str) -> pd.DataFrame:
 def read_chunked_csvs(dir_path: str) -> pd.DataFrame:
     """Read a folder of chunk CSVs produced by :func:`~eosframes.split_csv`.
 
-    Files must be named ``chunk_<N>.csv`` (zero-padded index) and all
-    share the same column layout. The model ID is
-    extracted from the directory name.
+    Files must be named ``<prefix>_<N>.csv`` (typically ``chunk_<N>.csv``)
+    with a zero-padded numeric index ``N``. All files in the directory
+    must share the same prefix and the same column layout. The model ID
+    and version are extracted from the directory name and attached as
+    ``df.model_id`` / ``df.version``.
 
     Parameters
     ----------
@@ -117,14 +151,16 @@ def read_chunked_csvs(dir_path: str) -> pd.DataFrame:
 
     Returns
     -------
-    pd.DataFrame
-        All chunks concatenated in numeric order.
+    pandas.DataFrame
+        All chunks concatenated in ascending index order, with row
+        indices reset.
 
     Raises
     ------
     EosframesError
         If the directory does not exist, has no recognisable model ID,
-        or contains unexpected non-CSV files.
+        contains unexpected non-CSV files, or contains chunks with
+        mismatched prefixes.
     """
     logger = get_logger()
     if not os.path.exists(dir_path):
@@ -137,6 +173,11 @@ def read_chunked_csvs(dir_path: str) -> pd.DataFrame:
     logger.info("Reading chunked CSVs from: %s", dir_path)
 
     filenames = os.listdir(dir_path)
+    if not filenames:
+        raise EosframesError(
+            f"Directory '{dir_path}' is empty. Expected one or more "
+            "chunk_<N>.csv files."
+        )
     batch_ids = []
     zfill = 0
     prefixes = []

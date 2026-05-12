@@ -1,11 +1,20 @@
-"""Stack Ersilia DataFrames horizontally or vertically."""
+"""Stack Ersilia DataFrames horizontally or vertically.
+
+These are the in-memory counterparts of :func:`eosframes.stack_files`
+(horizontal, multi-model) and :func:`eosframes.append_files` (vertical,
+single model). Use them when you already have DataFrames in hand —
+typically from :func:`eosframes.read_csv` / :func:`eosframes.read_h5`,
+which attach the ``model_id`` and ``version`` attributes that these
+functions require.
+"""
 
 from typing import List
 
 import pandas as pd
 
-from ..exceptions import EosframesError
-from ..naming import is_model_id_valid
+from .exceptions import EosframesError
+from .logger import get_logger
+from .naming import is_model_id_valid
 
 _STACK_MODES = ("eosmix", "explicit")
 
@@ -13,36 +22,47 @@ _STACK_MODES = ("eosmix", "explicit")
 def hstack(df_list: List[pd.DataFrame], mode: str) -> pd.DataFrame:
     """Stack Ersilia DataFrames horizontally (one model per frame).
 
-    All frames must share the same ``input`` column in the same order. Two
-    naming conventions are available, matched to the two stack filename
-    modes (see :func:`eosframes.naming.is_valid_stack_mix_name` and
-    :func:`eosframes.naming.is_valid_stack_explicit_name`):
+    All frames must share the same ``input`` column in the same order.
+    The resulting DataFrame has the shared ``key`` / ``input`` columns
+    once, followed by feature columns from each input in input order.
+
+    Two naming strategies are available, matched to the two stack
+    filename modes (see :func:`eosframes.naming.is_valid_stack_mix_name`
+    and :func:`eosframes.naming.is_valid_stack_explicit_name`):
 
     * ``mode="eosmix"`` — feature column names are suffixed with
       ``_<model_id>_<version>`` so provenance lives in the columns.
-    * ``mode="explicit"`` — feature column names are kept as-is (provenance
-      lives in the filename that will carry every model's id + version).
+    * ``mode="explicit"`` — feature column names are kept as-is, so
+      provenance must live in the destination filename (which will list
+      every model's ``model_id`` and ``version``).
 
     Parameters
     ----------
-    df_list : list of pd.DataFrame
-        DataFrames to stack. Each must have ``model_id`` and ``version``
-        attributes (set automatically by ``read_csv`` / ``read_h5`` when
-        the filename follows the naming convention).
+    df_list : list of pandas.DataFrame
+        DataFrames to stack. Must be non-empty, and each frame must
+        have ``model_id`` and ``version`` attributes (both are set
+        automatically by :func:`eosframes.read_csv` /
+        :func:`eosframes.read_h5` when the filename encodes them).
     mode : {"eosmix", "explicit"}
         Column-naming strategy.
 
     Returns
     -------
-    pd.DataFrame
+    pandas.DataFrame
+        Without ``model_id`` / ``version`` attributes — a horizontal
+        stack is multi-model by definition.
 
     Raises
     ------
     EosframesError
-        If ``mode`` is unknown, any DataFrame is missing ``model_id`` or
-        ``version``, the same ``(model_id, version)`` pair appears twice,
-        or row inputs don't match.
+        If *df_list* is empty, *mode* is unknown, any DataFrame is
+        missing ``model_id`` or ``version``, the same
+        ``(model_id, version)`` pair appears twice, or row inputs
+        don't match across frames.
     """
+    logger = get_logger()
+    if not df_list:
+        raise EosframesError("hstack received an empty df_list.")
     if mode not in _STACK_MODES:
         raise EosframesError(
             f"Unknown stack mode: {mode!r}. Expected one of {_STACK_MODES}."
@@ -62,7 +82,7 @@ def hstack(df_list: List[pd.DataFrame], mode: str) -> pd.DataFrame:
             raise EosframesError(
                 f"DataFrame #{i} (model_id={model_id}) does not have a 'version' "
                 "attribute. Read the file with a name that encodes the version "
-                "(e.g. eos4e40_v1.csv) so df.version is set."
+                "(<model_id>_<version>.csv) so df.version is set."
             )
         pairs.append((model_id, version))
 
@@ -98,6 +118,7 @@ def hstack(df_list: List[pd.DataFrame], mode: str) -> pd.DataFrame:
     )
     result = pd.DataFrame(meta)
 
+    feature_count = 0
     for (model_id, version), df in zip(pairs, df_list):
         feature_cols = [c for c in df.columns if c not in {"key", "input"}]
         block = df[feature_cols].reset_index(drop=True)
@@ -107,7 +128,15 @@ def hstack(df_list: List[pd.DataFrame], mode: str) -> pd.DataFrame:
             )
         # mode == "explicit": leave column names as-is.
         result = pd.concat([result, block], axis=1)
+        feature_count += len(feature_cols)
 
+    logger.info(
+        "hstack: %d frames × %d rows → %d feature columns (mode=%s)",
+        len(df_list),
+        len(reference_inputs),
+        feature_count,
+        mode,
+    )
     return result
 
 
@@ -115,22 +144,34 @@ def vstack(df_list: List[pd.DataFrame]) -> pd.DataFrame:
     """Stack Ersilia DataFrames vertically (same model, multiple batches).
 
     All frames must share the same columns and the same ``model_id``.
+    The resulting DataFrame inherits the shared ``model_id`` so it can
+    be written directly with :func:`eosframes.write_csv` /
+    :func:`eosframes.write_h5`.
 
     Parameters
     ----------
-    df_list : list of pd.DataFrame
-        DataFrames to stack. Each must have a ``model_id`` attribute.
+    df_list : list of pandas.DataFrame
+        DataFrames to stack. Must be non-empty; each frame must have a
+        ``model_id`` attribute.
 
     Returns
     -------
-    pd.DataFrame
+    pandas.DataFrame
+        With ``model_id`` set to the shared model ID. Note that
+        ``version`` is intentionally **not** propagated — vertical
+        concatenation across versions is allowed (it's the same model)
+        but the result no longer corresponds to a single version.
 
     Raises
     ------
     EosframesError
-        If columns differ, ``model_id`` attributes are missing, or model IDs
-        do not all match.
+        If *df_list* is empty, columns differ across frames, any
+        ``model_id`` attribute is missing, or the model IDs do not all
+        match.
     """
+    logger = get_logger()
+    if not df_list:
+        raise EosframesError("vstack received an empty df_list.")
     model_ids = [getattr(df, "model_id", None) for df in df_list]
     for i, model_id in enumerate(model_ids):
         if model_id is None:
@@ -154,4 +195,10 @@ def vstack(df_list: List[pd.DataFrame]) -> pd.DataFrame:
 
     result = pd.concat(df_list, axis=0).reset_index(drop=True)
     result.model_id = model_ids[0]
+    logger.info(
+        "vstack: %d frames → %d rows (model_id=%s)",
+        len(df_list),
+        len(result),
+        model_ids[0],
+    )
     return result

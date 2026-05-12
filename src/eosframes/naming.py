@@ -1,4 +1,34 @@
-"""Naming convention parsing and validation for Ersilia output files."""
+"""Naming convention parsing and validation for Ersilia output files.
+
+This module is the single source of truth for the eosframes naming
+convention. Every read- and write-side gate in the library funnels through
+the helpers here, so the rules below are enforced uniformly across CSV,
+HDF5, chunk directories, sidecar files, transformer JSONs, and stack
+outputs.
+
+Canonical patterns
+------------------
+* Data file:        ``[prefix_]<model_id>_<version>.<ext>``
+* Chunks directory: ``[prefix_]<model_id>_<version>_chunks``
+* Sidecar CSV:      ``[prefix_]<model_id>_<version>_<kind>.csv``
+                    where ``kind`` is ``info``, ``columns``, or ``summary``
+* Transformer:      ``[prefix_]<model_id>_<version>_transformer.json``
+* Stack, Mode A:    ``[prefix_]eosmix.csv``  (column names carry provenance)
+* Stack, Mode B:    ``[prefix_]<m1>_<v1>_..._<mN>_<vN>.csv`` (N >= 2)
+
+with
+
+* ``model_id`` matching ``eos\\d[A-Za-z0-9]{3}``,
+* ``version`` matching ``v\\d+``,
+* ``ext`` in ``{"csv", "h5"}``,
+* ``prefix`` an optional alphanumeric token, possibly with internal
+  underscores.
+
+Two helpers anchor the API: :func:`parse_name` (strict, returns the full
+tuple of components) and :func:`get_model_id_from_path` (lenient, scans the
+basename for any model-ID-shaped substring). Strict gates use the former;
+read paths and informational helpers use the latter.
+"""
 
 import os
 import re
@@ -35,7 +65,7 @@ def is_model_id_valid(model_id: str) -> bool:
     Parameters
     ----------
     model_id : str
-        Candidate model identifier, e.g. ``"eos4e40"``.
+        Candidate model identifier.
 
     Returns
     -------
@@ -70,13 +100,13 @@ def parse_name(filename: str) -> Optional[Dict]:
 
     Recognizes:
 
-    * ``eos4e40_v1.csv``              → ``name_type="csv"``
-    * ``eos4e40_v1.h5``               → ``name_type="h5"``
-    * ``eos4e40_v1_chunks``           → ``name_type="chunks_dir"``
-    * ``eos4e40_v1_info.csv``         → ``name_type="info"``
-    * ``eos4e40_v1_columns.csv``      → ``name_type="columns"``
-    * ``eos4e40_v1_summary.csv``      → ``name_type="summary"``
-    * ``260313_gardp_eos4e40_v1.csv`` → prefix allowed before model_id
+    * ``<model_id>_<version>.csv``             → ``name_type="csv"``
+    * ``<model_id>_<version>.h5``              → ``name_type="h5"``
+    * ``<model_id>_<version>_chunks``          → ``name_type="chunks_dir"``
+    * ``<model_id>_<version>_info.csv``        → ``name_type="info"``
+    * ``<model_id>_<version>_columns.csv``     → ``name_type="columns"``
+    * ``<model_id>_<version>_summary.csv``     → ``name_type="summary"``
+    * ``<prefix>_<model_id>_<version>.csv``    → prefix allowed before model_id
 
     Parameters
     ----------
@@ -146,16 +176,16 @@ def make_output_name(model_id: str, version: str, ext: str) -> str:
     Parameters
     ----------
     model_id : str
-        e.g. ``"eos4e40"``
+        Model identifier matching ``eos\\d[A-Za-z0-9]{3}``.
     version : str
-        e.g. ``"v1"``
+        Version string matching ``v\\d+``.
     ext : str
         ``"csv"`` or ``"h5"`` (without leading dot)
 
     Returns
     -------
     str
-        e.g. ``"eos4e40_v1.csv"``
+        ``"<model_id>_<version>.<ext>"``.
 
     Raises
     ------
@@ -179,7 +209,7 @@ def make_chunks_dir_name(model_id: str, version: str) -> str:
     Returns
     -------
     str
-        e.g. ``"eos4e40_v1_chunks"``
+        ``"<model_id>_<version>_chunks"``.
 
     Raises
     ------
@@ -194,7 +224,7 @@ def make_chunks_dir_name(model_id: str, version: str) -> str:
 
 
 def get_version_from_path(path: str) -> Optional[str]:
-    """Extract the version token (e.g. ``"v1"``) from a filename or path.
+    """Extract the version token (matching ``v\\d+``) from a filename or path.
 
     Parameters
     ----------
@@ -211,10 +241,19 @@ def get_version_from_path(path: str) -> Optional[str]:
 def is_valid_name(path: str) -> bool:
     """Return ``True`` if *path* is a valid Ersilia data file or directory.
 
-    Accepts csv files, h5 files, and chunks directories. Sidecar files
-    (``_info.csv``, ``_columns.csv``) are **not** considered valid data
-    names and are rejected here — use :func:`is_valid_info_name` /
-    :func:`is_valid_columns_name` for those.
+    Accepts CSV files, H5 files, and chunks directories. Sidecar files
+    (``_info.csv``, ``_columns.csv``, ``_summary.csv``) are **not**
+    considered valid data names and are rejected here — use the dedicated
+    ``is_valid_*_name`` helpers for those.
+
+    Parameters
+    ----------
+    path : str
+        File or directory path; only the basename is considered.
+
+    Returns
+    -------
+    bool
     """
     parsed = parse_name(path)
     return parsed is not None and parsed["name_type"] in {"csv", "h5", "chunks_dir"}
@@ -223,7 +262,15 @@ def is_valid_name(path: str) -> bool:
 def is_valid_info_name(path: str) -> bool:
     """Return ``True`` if *path* follows the info-sidecar convention.
 
-    Matches ``[prefix]_<model_id>_<version>_info.csv``.
+    Matches ``[prefix_]<model_id>_<version>_info.csv``.
+
+    Parameters
+    ----------
+    path : str
+
+    Returns
+    -------
+    bool
     """
     parsed = parse_name(path)
     return parsed is not None and parsed["name_type"] == "info"
@@ -232,7 +279,15 @@ def is_valid_info_name(path: str) -> bool:
 def is_valid_columns_name(path: str) -> bool:
     """Return ``True`` if *path* follows the columns-sidecar convention.
 
-    Matches ``[prefix]_<model_id>_<version>_columns.csv``.
+    Matches ``[prefix_]<model_id>_<version>_columns.csv``.
+
+    Parameters
+    ----------
+    path : str
+
+    Returns
+    -------
+    bool
     """
     parsed = parse_name(path)
     return parsed is not None and parsed["name_type"] == "columns"
@@ -241,7 +296,15 @@ def is_valid_columns_name(path: str) -> bool:
 def is_valid_summary_name(path: str) -> bool:
     """Return ``True`` if *path* follows the summary-sidecar convention.
 
-    Matches ``[prefix]_<model_id>_<version>_summary.csv``.
+    Matches ``[prefix_]<model_id>_<version>_summary.csv``.
+
+    Parameters
+    ----------
+    path : str
+
+    Returns
+    -------
+    bool
     """
     parsed = parse_name(path)
     return parsed is not None and parsed["name_type"] == "summary"
@@ -250,17 +313,12 @@ def is_valid_summary_name(path: str) -> bool:
 def _make_sidecar_name(
     model_id: str, version: str, kind: str, prefix: Optional[str] = None
 ) -> str:
-    """Build a canonical sidecar filename (``_info.csv`` or ``_columns.csv``)."""
+    """Build a canonical sidecar filename (``_info.csv``, ``_columns.csv``, ``_summary.csv``)."""
     if not is_model_id_valid(model_id):
         raise ValueError(f"Invalid model_id: {model_id!r}")
     if not re.match(r"^v\d+$", version):
         raise ValueError(f"Invalid version: {version!r}. Expected format: v1, v2, ...")
-    if prefix is not None and not re.fullmatch(
-        r"[A-Za-z0-9]+(?:_[A-Za-z0-9]+)*", prefix
-    ):
-        raise ValueError(
-            f"Invalid prefix: {prefix!r}. Must be alphanumeric tokens joined by underscores."
-        )
+    _validate_prefix(prefix)
     stem = f"{model_id}_{version}_{kind}"
     return f"{prefix}_{stem}.csv" if prefix else f"{stem}.csv"
 
@@ -271,7 +329,7 @@ def make_info_name(model_id: str, version: str, prefix: Optional[str] = None) ->
     Returns
     -------
     str
-        e.g. ``"eos4e40_v1_info.csv"`` or ``"example_eos4e40_v1_info.csv"``.
+        ``"[<prefix>_]<model_id>_<version>_info.csv"``.
 
     Raises
     ------
@@ -287,7 +345,7 @@ def make_columns_name(model_id: str, version: str, prefix: Optional[str] = None)
     Returns
     -------
     str
-        e.g. ``"eos4e40_v1_columns.csv"`` or ``"example_eos4e40_v1_columns.csv"``.
+        ``"[<prefix>_]<model_id>_<version>_columns.csv"``.
 
     Raises
     ------
@@ -303,7 +361,7 @@ def make_summary_name(model_id: str, version: str, prefix: Optional[str] = None)
     Returns
     -------
     str
-        e.g. ``"eos4e40_v1_summary.csv"`` or ``"example_eos4e40_v1_summary.csv"``.
+        ``"[<prefix>_]<model_id>_<version>_summary.csv"``.
 
     Raises
     ------
@@ -343,6 +401,14 @@ def is_valid_transformer_name(path: str) -> bool:
     """Return ``True`` if *path* follows the transformer/scaler naming convention.
 
     Matches ``[prefix_]<model_id>_<version>_transformer.json``.
+
+    Parameters
+    ----------
+    path : str
+
+    Returns
+    -------
+    bool
     """
     return parse_transformer_name(path) is not None
 
@@ -355,8 +421,7 @@ def make_transformer_name(
     Returns
     -------
     str
-        e.g. ``"eos4e40_v1_transformer.json"`` or
-        ``"example_eos4e40_v1_transformer.json"``.
+        ``"[<prefix>_]<model_id>_<version>_transformer.json"``.
 
     Raises
     ------
@@ -367,12 +432,7 @@ def make_transformer_name(
         raise ValueError(f"Invalid model_id: {model_id!r}")
     if not re.match(r"^v\d+$", version):
         raise ValueError(f"Invalid version: {version!r}. Expected format: v1, v2, ...")
-    if prefix is not None and not re.fullmatch(
-        r"[A-Za-z0-9]+(?:_[A-Za-z0-9]+)*", prefix
-    ):
-        raise ValueError(
-            f"Invalid prefix: {prefix!r}. Must be alphanumeric tokens joined by underscores."
-        )
+    _validate_prefix(prefix)
     stem = f"{model_id}_{version}_transformer"
     return f"{prefix}_{stem}.json" if prefix else f"{stem}.json"
 
@@ -419,7 +479,18 @@ def parse_stack_mix_name(path: str) -> Optional[Dict]:
 
 
 def is_valid_stack_mix_name(path: str) -> bool:
-    """Return True if *path* follows the Mode A stack convention."""
+    """Return ``True`` if *path* follows the Mode A stack convention.
+
+    Matches ``[prefix_]eosmix.csv``.
+
+    Parameters
+    ----------
+    path : str
+
+    Returns
+    -------
+    bool
+    """
     return parse_stack_mix_name(path) is not None
 
 
@@ -483,7 +554,18 @@ def parse_stack_explicit_name(path: str) -> Optional[Dict]:
 
 
 def is_valid_stack_explicit_name(path: str) -> bool:
-    """Return True if *path* follows the Mode B stack convention (N>=2 models)."""
+    """Return ``True`` if *path* follows the Mode B stack convention.
+
+    Matches ``[prefix_]<m1>_<v1>_..._<mN>_<vN>.csv`` with N >= 2.
+
+    Parameters
+    ----------
+    path : str
+
+    Returns
+    -------
+    bool
+    """
     return parse_stack_explicit_name(path) is not None
 
 
@@ -502,8 +584,7 @@ def make_stack_explicit_name(
     Returns
     -------
     str
-        e.g. ``"eos4e40_v1_eos7m30_v1.csv"`` or
-        ``"example_eos4e40_v1_eos7m30_v1.csv"``.
+        ``"[<prefix>_]<m1>_<v1>_..._<mN>_<vN>.csv"``.
 
     Raises
     ------

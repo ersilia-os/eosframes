@@ -1,8 +1,26 @@
+"""Click-based command-line interface for ``eosframes``.
+
+Each command is a thin wrapper around a public function in
+:mod:`eosframes.ops`, :mod:`eosframes.scale`, or :mod:`eosframes.hub`.
+Business logic lives in those modules; this file only handles argument
+parsing, output formatting, and translating
+:class:`~eosframes.EosframesError` into a user-friendly
+:class:`click.ClickException` (which Click renders with its standard
+``Error:`` prefix and a non-zero exit code).
+
+Run ``eosframes --help`` to list every command, or
+``eosframes <command> --help`` for the per-command help text.
+"""
+
+import json
 import os
-from typing import Optional
+from typing import Callable, Optional
 
 import click
 import pandas as pd
+from rich import box
+from rich.console import Console
+from rich.table import Table
 
 from . import hub, ops
 from . import scale as _scale
@@ -20,6 +38,7 @@ from .naming import (
 
 
 def _err(e: EosframesError) -> click.ClickException:
+    """Wrap an :class:`EosframesError` for Click's exit-code handling."""
     return click.ClickException(str(e))
 
 
@@ -31,12 +50,11 @@ def _parse_input_or_fail(input_path: str) -> dict:
         raise click.ClickException(
             f"'{basename}' does not follow the Ersilia naming convention.\n\n"
             "Expected one of (prefix optional):\n"
-            "  [prefix]_<model_id>_<version>.csv   e.g. eos4e40_v1.csv, example_eos4e40_v1.csv\n"
-            "  [prefix]_<model_id>_<version>.h5    e.g. eos4e40_v1.h5\n"
-            "  [prefix]_<model_id>_<version>_chunks/  e.g. eos4e40_v1_chunks/\n\n"
-            "model_id = 'eos' + 1 digit + 3 alphanumeric (e.g. eos4e40).\n"
-            "version  = 'v' + integer             (e.g. v1).\n\n"
-            f"Try renaming to something like 'eos4e40_v1{os.path.splitext(basename)[1] or '.csv'}'."
+            "  [<prefix>_]<model_id>_<version>.csv\n"
+            "  [<prefix>_]<model_id>_<version>.h5\n"
+            "  [<prefix>_]<model_id>_<version>_chunks/\n\n"
+            "model_id = 'eos' + 1 digit + 3 alphanumeric characters.\n"
+            "version  = 'v' + integer.\n"
         )
     if parsed["name_type"] not in {"csv", "h5", "chunks_dir"}:
         raise click.ClickException(
@@ -79,9 +97,9 @@ def _resolve_sidecar_output(
             f"'{out_basename}' is not a valid {kind}-sidecar filename.\n\n"
             f"The filename must end with the literal suffix '_{kind}.csv' — the "
             f"'_{kind}' token is required, not optional.\n\n"
-            f"Expected: [prefix]_<model_id>_<version>_{kind}.csv\n"
+            f"Expected: [<prefix>_]<model_id>_<version>_{kind}.csv\n"
             "  where:\n"
-            "    [prefix]   optional, e.g. 'example' or '260313_gardp'\n"
+            "    <prefix>   optional alphanumeric token (underscores allowed)\n"
             f"    model_id   must match --input ('{model_id}')\n"
             f"    version    must match --input ('{version}')\n"
             f"    _{kind}     literal token (required)\n\n"
@@ -111,13 +129,94 @@ def _resolve_sidecar_output(
     return output
 
 
+def _flatten_metadata_value(v) -> str:
+    """Stringify a value pulled from ``hub.fetch_metadata`` for tabular display."""
+    if isinstance(v, list):
+        return " | ".join(str(item) for item in v)
+    if isinstance(v, dict):
+        return json.dumps(v)
+    if v is None:
+        return ""
+    return str(v)
+
+
+def _render_sidecar(
+    *,
+    input_file: str,
+    rows: pd.DataFrame,
+    resolved_out: Optional[str],
+    csv_label: str,
+    highlight_first_col: bool = True,
+) -> None:
+    """Render a hub-fetched sidecar as a Rich table and (optionally) write CSV.
+
+    Shared assembly + presentation for the ``info`` and ``columns``
+    commands. The two callers differ only in *how* they fetch their
+    rows; everything from the rule banner downward is identical, so it
+    lives here.
+    """
+    console = Console()
+    console.print()
+    console.rule(f"[bold cyan]{os.path.basename(input_file)}[/bold cyan]")
+    table = Table(
+        box=box.SIMPLE_HEAD,
+        show_header=True,
+        header_style="bold magenta",
+        show_edge=False,
+    )
+    for i, col in enumerate(rows.columns):
+        is_first = i == 0 and highlight_first_col
+        table.add_column(
+            str(col),
+            style="cyan" if is_first else None,
+            overflow="fold",
+            no_wrap=is_first,
+        )
+    for _, row in rows.iterrows():
+        table.add_row(
+            *(str(v) if pd.notna(v) and v != "" else "[dim]—[/dim]" for v in row)
+        )
+    console.print(table)
+
+    if resolved_out is not None:
+        rows.to_csv(resolved_out, index=False)
+        get_logger().info(
+            "%s written to %s (%d row(s))", csv_label, resolved_out, len(rows)
+        )
+        click.echo(resolved_out)
+
+
+def _fetch_or_clickfail(
+    fetch: Callable, *args, **kwargs
+):
+    """Call a hub fetcher and convert ``EosframesError`` to ``ClickException``."""
+    try:
+        return fetch(*args, **kwargs)
+    except EosframesError as e:
+        raise _err(e) from e
+
+
 @click.group()
 def main():
     """eosframes — Ersilia output data utilities.
 
     Manipulate inputs and outputs from the Ersilia Model Hub.
-    File naming convention for outputs: <model_id>_<version>.<ext>
-    (e.g. eos4e40_v1.csv, eos4e40_v1.h5, eos4e40_v1_chunks/)
+
+    Output filenames follow a strict naming convention:
+
+    \b
+      [prefix_]<model_id>_<version>.<ext>            data files (.csv, .h5)
+      [prefix_]<model_id>_<version>_chunks/          folder of chunk CSVs
+      [prefix_]<model_id>_<version>_<kind>.csv       sidecars (info/columns/summary)
+      [prefix_]<model_id>_<version>_transformer.json saved scaler
+
+    where model_id matches eos<digit><3 alphanumeric>
+    and version matches v<integer>.
+
+    Read paths are lenient — only a recognizable model ID is required
+    on inputs. ``eosframes split`` is the single full exception.
+
+    Set EOSFRAMES_LOG_LEVEL=DEBUG to see verbose logs.
     """
 
 
@@ -161,21 +260,21 @@ def split(input_csv: str, output_folder: str, chunksize: int) -> None:
     "output_path",
     required=True,
     type=click.Path(),
-    help="Output file. Must follow the naming convention (eos4e40_v1.csv or eos4e40_v1.h5).",
+    help="Output file. Must follow the naming convention: <model_id>_<version>.<csv|h5>.",
 )
 def convert(input_path: str, output_path: str) -> None:
     """Convert between CSV, H5, and chunk folders, inferring format from file extensions.
 
     The input can be a CSV file, an H5 file, or a folder of chunk CSV files.
-    The output must follow the naming convention: eos4e40_v1.csv or eos4e40_v1.h5.
+    The output must follow the naming convention <model_id>_<version>.<csv|h5>.
 
     Supported conversions:
 
     \b
-      folder/  → eos4e40_v1.csv   (assemble chunks into CSV)
-      folder/  → eos4e40_v1.h5    (assemble chunks into H5)
-      .csv     → eos4e40_v1.h5    (CSV to H5)
-      .h5      → eos4e40_v1.csv   (H5 to CSV)
+      folder/  → CSV   (assemble chunks into CSV)
+      folder/  → H5    (assemble chunks into H5)
+      .csv     → H5    (CSV to H5)
+      .h5      → CSV   (H5 to CSV)
     """
     try:
         ops.convert_file(input_path, output_path)
@@ -201,25 +300,20 @@ def convert(input_path: str, output_path: str) -> None:
 def stack(inputs: tuple, output: str) -> None:
     """Horizontally stack outputs from multiple Ersilia models into one CSV.
 
-    Each INPUT must be a CSV or H5 file following the naming convention
-    (e.g. eos4e40_v1.csv). All files must contain the same inputs in the
-    same order — this is validated before stacking.
+    Each INPUT must be a CSV or H5 file following the naming convention. All
+    files must contain the same inputs in the same order — this is validated
+    before stacking.
 
     The 'key' and 'input' columns are kept only once in the output.
 
     The naming of the output file picks the column convention (pick one):
 
     \b
-      Mode A:  [prefix]_eosmix.csv
+      Mode A:  [<prefix>_]eosmix.csv
                → each feature column becomes <column>_<model_id>_<version>
-      Mode B:  [prefix]_<m1>_<v1>_..._<mN>_<vN>.csv
+      Mode B:  [<prefix>_]<m1>_<v1>_..._<mN>_<vN>.csv
                → feature columns stay bare; each model appears in the
                  filename in the same order as the INPUTS.
-
-    \b
-    Examples:
-      eosframes stack eos4e40_v1.csv eos3804_v1.csv -o project_eosmix.csv
-      eosframes stack eos4e40_v1.csv eos3804_v1.csv -o eos4e40_v1_eos3804_v1.csv
     """
     try:
         ops.stack_files(list(inputs), output)
@@ -243,21 +337,16 @@ def unstack(input_file: str, output_folder: str) -> None:
     The mode is resolved from the input filename:
 
     \b
-      Mode A ([prefix]_eosmix.csv):
+      Mode A ([<prefix>_]eosmix.csv):
         Column names carry the provenance. Columns are grouped by their
         _<model_id>_<version> suffix; the suffix is stripped when writing
         each per-model file.
-      Mode B ([prefix]_<m1>_<v1>_..._<mN>_<vN>.csv):
+      Mode B ([<prefix>_]<m1>_<v1>_..._<mN>_<vN>.csv):
         Column names are bare. Each model's run_columns.csv is fetched
         from GitHub and columns are distributed by name.
 
-    Each per-model file is written as <prefix>_<model_id>_<version>.csv
+    Each per-model file is written as [<prefix>_]<model_id>_<version>.csv
     with the prefix inherited from the stacked filename.
-
-    \b
-    Examples:
-      eosframes unstack project_eosmix.csv -o ./split/
-      eosframes unstack eos4e40_v1_eos7m30_v1.csv -o ./split/
     """
     try:
         ops.unstack_file(input_file, output_folder)
@@ -274,7 +363,7 @@ def unstack(input_file: str, output_folder: str) -> None:
     "-o",
     required=True,
     type=click.Path(),
-    help="Output file path (must follow naming convention, e.g. eos4e40_v1.csv or eos4e40_v1.h5).",
+    help="Output file path (must follow the naming convention <model_id>_<version>.<csv|h5>).",
 )
 def append(inputs: tuple, output: str) -> None:
     """Vertically concatenate files from the same Ersilia model.
@@ -285,11 +374,6 @@ def append(inputs: tuple, output: str) -> None:
 
     The output must follow the naming convention and its model ID must match
     the inputs. Format is inferred from the output extension (.csv or .h5).
-
-    \b
-    Example:
-      eosframes append eos4e40_v1_batch1.csv eos4e40_v1_batch2.csv -o eos4e40_v1.csv
-      eosframes append eos4e40_v1_part1.h5 eos4e40_v1_part2.h5    -o eos4e40_v1.h5
     """
     try:
         ops.append_files(list(inputs), output)
@@ -313,10 +397,6 @@ def dedupe(input_file: str, output_file: str) -> None:
     Reads the input, drops any row whose 'key' value has already appeared,
     and writes the result to the output file. Both files must share the
     same model ID. Output format is inferred from the extension (.csv or .h5).
-
-    \b
-    Example:
-      eosframes dedupe eos4e40_v1_raw.csv -o eos4e40_v1.csv
     """
     try:
         ops.dedupe_file(input_file, output_file)
@@ -346,16 +426,7 @@ def summary(input_file: str, output: str) -> None:
 
     With --output, the per-feature stats are also written as a sidecar CSV
     (one row per feature column).
-
-    \b
-    Examples:
-      eosframes summary eos4e40_v1.csv
-      eosframes summary eos4e40_v1.csv -o eos4e40_v1_summary.csv
     """
-    from rich import box
-    from rich.console import Console
-    from rich.table import Table
-
     console = Console()
     df = ops._read_file(input_file)
 
@@ -385,25 +456,7 @@ def summary(input_file: str, output: str) -> None:
     def _fmt(v: float) -> str:
         return f"{v:.0f}" if v == int(v) else f"{v:.4g}"
 
-    stats_rows = []
-    for col in feature_cols:
-        series = df[col]
-        n_missing = int(series.isna().sum())
-        row = {
-            "column": col,
-            "dtype": str(series.dtype),
-            "missing": n_missing,
-            "min": None,
-            "mean": None,
-            "max": None,
-        }
-        if pd.api.types.is_numeric_dtype(series):
-            clean = series.dropna()
-            if len(clean):
-                row["min"] = float(clean.min())
-                row["mean"] = float(clean.mean())
-                row["max"] = float(clean.max())
-        stats_rows.append(row)
+    stats_rows = ops._compute_summary_stats(df)
 
     def _label_row(label: str, value: str) -> None:
         # Pad label to 14 chars so values line up (longest label = "Unique inputs:" = 14).
@@ -513,62 +566,26 @@ def info(input_file: str, output: str) -> None:
     version are resolved from its name.
 
     With --output, a sidecar CSV is also written. The output must follow
-    [prefix]_<model_id>_<version>_info.csv and its model_id / version must
-    match the input.
-
-    \b
-    Examples:
-      eosframes info data/example_eos4e40_v1.csv
-      eosframes info data/example_eos4e40_v1.csv -o example_eos4e40_v1_info.csv
+    [<prefix>_]<model_id>_<version>_info.csv and its model_id / version
+    must match the input.
     """
-    from rich import box
-    from rich.console import Console
-    from rich.table import Table
-
     parsed_in = _parse_input_or_fail(input_file)
     resolved_out = _resolve_sidecar_output(output, parsed_in, "info")
-    model_id = parsed_in["model_id"]
-
-    try:
-        metadata = hub.fetch_metadata(model_id)
-    except EosframesError as e:
-        raise _err(e) from e
-
-    def _flatten(v) -> str:
-        import json
-
-        if isinstance(v, list):
-            return " | ".join(str(item) for item in v)
-        if isinstance(v, dict):
-            return json.dumps(v)
-        if v is None:
-            return ""
-        return str(v)
-
-    rows = [(k, _flatten(v)) for k, v in metadata.items()]
-
-    console = Console()
-    console.print()
-    console.rule(f"[bold cyan]{os.path.basename(input_file)}[/bold cyan]")
-    table = Table(
-        box=box.SIMPLE_HEAD,
-        show_header=True,
-        header_style="bold magenta",
-        show_edge=False,
+    metadata = dict(_fetch_or_clickfail(hub.fetch_metadata, parsed_in["model_id"]))
+    identifier = metadata.pop("Identifier", None)
+    fields = ["Identifier", "Version", *metadata.keys()]
+    values = [
+        _flatten_metadata_value(identifier),
+        parsed_in["version"],
+        *(_flatten_metadata_value(v) for v in metadata.values()),
+    ]
+    rows = pd.DataFrame({"field": fields, "value": values})
+    _render_sidecar(
+        input_file=input_file,
+        rows=rows,
+        resolved_out=resolved_out,
+        csv_label="Metadata",
     )
-    table.add_column("field", style="cyan", no_wrap=True)
-    table.add_column("value", overflow="fold")
-    for field, value in rows:
-        table.add_row(field, value if value else "[dim]—[/dim]")
-    console.print(table)
-
-    if resolved_out is not None:
-        pd.DataFrame(
-            {"field": [k for k, _ in rows], "value": [v for _, v in rows]}
-        ).to_csv(resolved_out, index=False)
-        logger = get_logger()
-        logger.info("Metadata written to %s (%d fields)", resolved_out, len(rows))
-        click.echo(resolved_out)
 
 
 @main.command(short_help="Show feature column definitions for a model version.")
@@ -591,53 +608,20 @@ def columns(input_file: str, output: str) -> None:
     version are resolved from its name.
 
     With --output, a sidecar CSV is also written. The output must follow
-    [prefix]_<model_id>_<version>_columns.csv and its model_id / version must
-    match the input.
-
-    \b
-    Examples:
-      eosframes columns data/example_eos4e40_v1.csv
-      eosframes columns data/example_eos4e40_v1.csv -o example_eos4e40_v1_columns.csv
+    [<prefix>_]<model_id>_<version>_columns.csv and its model_id / version
+    must match the input.
     """
-    from rich import box
-    from rich.console import Console
-    from rich.table import Table
-
     parsed_in = _parse_input_or_fail(input_file)
     resolved_out = _resolve_sidecar_output(output, parsed_in, "columns")
-    model_id = parsed_in["model_id"]
-    version = parsed_in["version"]
-
-    try:
-        df = hub.fetch_columns(model_id, version)
-    except EosframesError as e:
-        raise _err(e) from e
-
-    console = Console()
-    console.print()
-    console.rule(f"[bold cyan]{os.path.basename(input_file)}[/bold cyan]")
-    table = Table(
-        box=box.SIMPLE_HEAD,
-        show_header=True,
-        header_style="bold magenta",
-        show_edge=False,
+    rows = _fetch_or_clickfail(
+        hub.fetch_columns, parsed_in["model_id"], parsed_in["version"]
     )
-    for col in df.columns:
-        table.add_column(
-            str(col),
-            style="cyan" if col == "name" else None,
-            overflow="fold",
-            no_wrap=(col == "name"),
-        )
-    for _, row in df.iterrows():
-        table.add_row(*(str(v) if pd.notna(v) else "[dim]—[/dim]" for v in row))
-    console.print(table)
-
-    if resolved_out is not None:
-        df.to_csv(resolved_out, index=False)
-        logger = get_logger()
-        logger.info("Columns written to %s (%d column(s))", resolved_out, len(df))
-        click.echo(resolved_out)
+    _render_sidecar(
+        input_file=input_file,
+        rows=rows,
+        resolved_out=resolved_out,
+        csv_label="Columns",
+    )
 
 
 @main.command(short_help="Fit a scaler and save parameters to a JSON file.")
@@ -656,21 +640,67 @@ def columns(input_file: str, output: str) -> None:
     type=click.Path(),
     help="If provided, also write the scaled data here (fit-transform).",
 )
-def fit(input_file: str, scaler: str, output: str) -> None:
-    """Fit a scaler on INPUT_FILE and save parameters to SCALER.
+@click.option(
+    "--quantize",
+    "quantize",
+    is_flag=True,
+    default=False,
+    help=(
+        "Only meaningful with -o: quantize the inline-transform output to "
+        "int8 in [-127, 127] (sentinel -128 for missing). Has no effect on "
+        "the saved scaler JSON, which is dtype-agnostic."
+    ),
+)
+@click.option(
+    "--impute",
+    "impute",
+    is_flag=True,
+    default=False,
+    help=(
+        "Only meaningful with -o: replace input NaN with each column's "
+        "fit-time median (rounded to int for integer columns) before the "
+        "inline transform. Has no effect on the saved scaler JSON — the "
+        "impute value is always recorded; the flag only opts in at "
+        "transform time."
+    ),
+)
+def fit(input_file: str, scaler: str, output: str, quantize: bool, impute: bool) -> None:
+    """Fit a type-aware robust scaler on INPUT_FILE and save parameters to SCALER.
 
-    Only numeric feature columns are fitted. Columns with more than 25 %
-    missing values are skipped. The key and input columns are ignored.
+    Each numeric feature column is auto-classified (constant, binary, count,
+    or continuous with right/left/centered sub-cases) and a type-specific
+    transform is fitted. Every numeric column is fitted — all-NaN columns
+    fall back to `type: constant, value: 0`. The key and input columns are
+    ignored.
 
-    When -o is given the scaled output is also written immediately (fit-transform).
-
-    \b
-    Examples:
-      eosframes fit eos4e40_v1.csv -s eos4e40_v1_transformer.json
-      eosframes fit eos4e40_v1.csv -s eos4e40_v1_transformer.json -o eos4e40_v1_scaled.csv
+    When -o is given the scaled output is also written immediately
+    (fit-transform). Neither --quantize nor --impute changes the saved
+    scaler JSON — both only affect the inline output. Both choices are
+    available at `eosframes transform` time on the saved scaler.
     """
+    if quantize and output is None:
+        click.echo(
+            "Warning: --quantize has no effect without -o; the saved scaler "
+            "JSON is dtype-agnostic. Pass --quantize to `eosframes transform` "
+            "to quantize at transform time.",
+            err=True,
+        )
+    if impute and output is None:
+        click.echo(
+            "Warning: --impute has no effect without -o; the impute value "
+            "is always recorded in the scaler JSON. Pass --impute to "
+            "`eosframes transform` to opt in at transform time.",
+            err=True,
+        )
+    output_dtype = "int8" if quantize else "float32"
     try:
-        _scale.fit_file(input_file, scaler, output_path=output)
+        _scale.fit_file(
+            input_file,
+            scaler,
+            output_path=output,
+            output_dtype=output_dtype,
+            impute=impute,
+        )
     except EosframesError as e:
         raise _err(e) from e
     click.echo(output if output is not None else scaler)
@@ -692,19 +722,43 @@ def fit(input_file: str, scaler: str, output: str) -> None:
     type=click.Path(),
     help="Output file path.",
 )
-def transform(input_file: str, scaler: str, output: str) -> None:
+@click.option(
+    "--quantize",
+    "quantize",
+    is_flag=True,
+    default=False,
+    help=(
+        "Quantize output to int8 in [-127, 127] (sentinel -128 for missing). "
+        "Default is float32."
+    ),
+)
+@click.option(
+    "--impute",
+    "impute",
+    is_flag=True,
+    default=False,
+    help=(
+        "Replace input NaN with each column's fit-time median (rounded to "
+        "int for integer columns) before applying the transform. The "
+        "output column will have no NaN entries (and, under --quantize, "
+        "no -128 sentinels)."
+    ),
+)
+def transform(input_file: str, scaler: str, output: str, quantize: bool, impute: bool) -> None:
     """Apply a saved scaler to INPUT_FILE and write scaled data to OUTPUT.
 
     Loads the scaler parameters from SCALER and applies them to the numeric
     feature columns of INPUT_FILE. The key and input columns pass through
-    unchanged.
-
-    \b
-    Example:
-      eosframes transform new_eos4e40_v1.csv -s eos4e40_v1_transformer.json -o scaled.csv
+    unchanged. Pass --quantize to write int8 output; default is float32.
+    Pass --impute to substitute each column's fit-time median for any input
+    NaN before the transform — the output column will then have no NaN
+    entries.
     """
+    output_dtype = "int8" if quantize else "float32"
     try:
-        out = _scale.transform_file(input_file, scaler, output)
+        out = _scale.transform_file(
+            input_file, scaler, output, output_dtype=output_dtype, impute=impute
+        )
     except EosframesError as e:
         raise _err(e) from e
     click.echo(out)

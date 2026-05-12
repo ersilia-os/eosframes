@@ -1,9 +1,11 @@
 """General-purpose utilities."""
 
+from typing import Iterator
+
 import pandas as pd
 
 
-def chunker(df: pd.DataFrame, chunksize: int = 10000):
+def chunker(df: pd.DataFrame, chunksize: int = 10000) -> Iterator[pd.DataFrame]:
     """Yield successive non-overlapping chunks of *df*.
 
     Parameters

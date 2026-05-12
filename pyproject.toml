@@ -37,7 +37,7 @@ click = ">=8.0"
 rich = ">=10.0"
 
 [tool.poetry.group.dev.dependencies]
-ruff = ">=0.4.0"
+ruff = ">=0.4,<1"
 pytest = ">=7.0"
 
 [tool.poetry.scripts]
@@ -48,13 +48,36 @@ line-length = 88
 target-version = "py38"
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "D"]
 ignore = [
     "E501",   # line too long — handled by formatter
     "B008",   # do not perform function calls in default arguments (Click uses this)
     "UP007",  # use X | Y for type annotations (not available in 3.8)
     "UP006",  # use type instead of Type (not available in 3.8)
+    "D203",   # conflicts with D211 (no blank line before class docstring)
+    "D213",   # conflicts with D212 (summary on first line)
+    "D301",   # backslashes — Click uses \b in help text, raw-strings hurt readability
+    "D401",   # imperative mood — too opinionated for descriptive docstrings
+    "D403",   # first-word capitalisation — the brand "eosframes" stays lowercase
+    "D415",   # first line ends with punctuation — D400 already covers periods
 ]
+
+[tool.ruff.lint.pydocstyle]
+convention = "numpy"
+
+[tool.ruff.lint.per-file-ignores]
+# Tests document themselves via descriptive names; don't require docstrings.
+"tests/*" = ["D"]
+# Subpackage __init__.py docstrings live in the modules they expose.
+"src/eosframes/**/__init__.py" = ["D104"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["eosframes"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Disable pytest's fd-level capture so the eosframes logger's handler
+# (pinned to sys.__stderr__ in tests/conftest.py) reaches the real terminal
+# during test runs. Without -s, pytest captures fd 2 even before the
+# Python-level sys.__stderr__ stream sees it.
+addopts = "-s"

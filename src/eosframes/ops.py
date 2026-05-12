@@ -1,4 +1,23 @@
-"""File-level operations for splitting, converting, stacking, appending, and deduplicating."""
+"""File-level operations: split, convert, stack, unstack, append, dedupe.
+
+Every public function in this module follows the same shape:
+
+1. Validate the destination path against the naming convention
+   (:func:`eosframes.naming.is_valid_name` and friends).
+2. Refuse to overwrite an existing output.
+3. Read the input(s) with :func:`eosframes.read.read_csv` /
+   :func:`eosframes.read.read_h5`, which attach ``df.model_id`` /
+   ``df.version``.
+4. Cross-validate model IDs (and versions where relevant) between input
+   and output before performing the operation.
+5. Re-set ``df.model_id`` / ``df.version`` after any pandas operation
+   that may drop loose attributes (``concat`` / ``drop_duplicates``),
+   then write via :func:`eosframes.write.write_csv` /
+   :func:`eosframes.write.write_h5`.
+
+The CLI in :mod:`eosframes.cli` is a thin Click adapter on top of these
+functions; business logic lives here.
+"""
 
 import os
 import re
@@ -10,7 +29,6 @@ import pandas as pd
 from . import hub
 from .exceptions import EosframesError
 from .logger import get_logger
-from .manipulate.stack import hstack
 from .naming import (
     is_model_id_valid,
     is_valid_name,
@@ -22,13 +40,18 @@ from .naming import (
     parse_stack_explicit_name,
     parse_stack_mix_name,
 )
-from .read.read import read_csv, read_h5
-from .utils.utils import chunker
-from .write.write import write_csv, write_h5
+from .read import read_csv, read_h5
+from .stack import hstack
+from .utils import chunker
+from .write import write_csv, write_h5
 
 
 def _read_file(path: str) -> pd.DataFrame:
-    """Read a CSV or H5 file into a DataFrame with model_id set."""
+    """Read a CSV or H5 file into a DataFrame with ``model_id`` set.
+
+    Internal dispatcher that delegates to :func:`eosframes.read.read_csv`
+    or :func:`eosframes.read.read_h5` based on the file extension.
+    """
     ext = os.path.splitext(path)[1].lower()
     if ext == ".csv":
         return read_csv(path)
@@ -39,8 +62,85 @@ def _read_file(path: str) -> pd.DataFrame:
     )
 
 
+def _require_no_overwrite(path: str, *, kind: str = "file") -> None:
+    """Refuse to clobber an existing output.
+
+    The two-message split (``"Remove it first."`` vs ``"Remove it or choose
+    a different name."``) is preserved by the *kind* argument so error
+    text users may already script against doesn't shift.
+    """
+    if not os.path.exists(path):
+        return
+    if kind == "folder":
+        raise EosframesError(
+            f"Output folder '{path}' already exists. "
+            "Remove it or choose a different name."
+        )
+    raise EosframesError(
+        f"Output file '{path}' already exists. Remove it first."
+    )
+
+
+def _compute_summary_stats(df: pd.DataFrame) -> List[Dict]:
+    """Per-feature summary statistics for an Ersilia output frame.
+
+    Returns one dict per non-meta column, with keys
+    ``column / dtype / missing / min / mean / max``. Numeric ``min`` /
+    ``mean`` / ``max`` are ``None`` for non-numeric columns or columns
+    that are fully missing — pretty-printers handle the rendering.
+
+    Lifted out of :func:`eosframes.cli.summary` so the CLI command shrinks
+    to argument parsing + Rich rendering and the math can be tested
+    directly.
+    """
+    feature_cols = [c for c in df.columns if c not in {"key", "input"}]
+    stats_rows: List[Dict] = []
+    for col in feature_cols:
+        series = df[col]
+        row: Dict = {
+            "column": col,
+            "dtype": str(series.dtype),
+            "missing": int(series.isna().sum()),
+            "min": None,
+            "mean": None,
+            "max": None,
+        }
+        if pd.api.types.is_numeric_dtype(series):
+            clean = series.dropna()
+            if len(clean):
+                row["min"] = float(clean.min())
+                row["mean"] = float(clean.mean())
+                row["max"] = float(clean.max())
+        stats_rows.append(row)
+    return stats_rows
+
+
+def _require_valid_output_name(path: str) -> Dict:
+    """Validate a data-file output path against the naming convention.
+
+    Returns the :func:`parse_name` dict on success; raises with the
+    standard ``"Expected: <model_id>_<version>.<ext>"`` message otherwise.
+    Used by every op whose output is a single data file (convert,
+    append, dedupe).
+    """
+    if not is_valid_name(path):
+        raise EosframesError(
+            f"Output '{path}' does not follow the naming convention. "
+            "Expected: [prefix_]<model_id>_<version>.<ext> "
+            "with ext in {csv, h5}."
+        )
+    return parse_name(path)
+
+
 def split_csv(input_path: str, output_folder: str, chunksize: int = 10000) -> int:
     """Split a CSV file into numbered chunk files inside a folder.
+
+    This is the only operation in the module that accepts inputs without
+    a model ID — its purpose is to pre-process inputs *before* a model
+    run, when the model is not yet known. Each chunk preserves the
+    original header. The chunk index is zero-padded to a width that
+    accommodates the largest index (``chunk_000.csv`` / ``chunk_007.csv``
+    for up to 1 000 chunks; ``chunk_000000.csv`` for >1 000).
 
     Parameters
     ----------
@@ -48,8 +148,9 @@ def split_csv(input_path: str, output_folder: str, chunksize: int = 10000) -> in
         Path to the input CSV file. No naming convention required.
     output_folder : str
         Path to the folder to create. Must not already exist.
-    chunksize : int
-        Number of rows per chunk (default 10000).
+    chunksize : int, default ``10000``
+        Number of rows per chunk. Smaller values produce more files;
+        larger values mean each chunk takes longer to run downstream.
 
     Returns
     -------
@@ -62,11 +163,7 @@ def split_csv(input_path: str, output_folder: str, chunksize: int = 10000) -> in
         If the output folder already exists.
     """
     logger = get_logger()
-    if os.path.exists(output_folder):
-        raise EosframesError(
-            f"Output folder '{output_folder}' already exists. "
-            "Remove it or choose a different name."
-        )
+    _require_no_overwrite(output_folder, kind="folder")
     df = pd.read_csv(input_path)
     total_rows = len(df)
     num_chunks = (total_rows + chunksize - 1) // chunksize
@@ -91,34 +188,35 @@ def convert_file(input_path: str, output_path: str) -> None:
 
     Supported conversions:
 
-    * folder of CSVs  → ``.csv`` or ``.h5``
-    * ``.csv``        → ``.h5``
-    * ``.h5``         → ``.csv``
+    * Folder of chunk CSVs → ``.csv`` (concatenate)
+    * Folder of chunk CSVs → ``.h5``  (concatenate, write HDF5)
+    * ``.csv``             → ``.h5``
+    * ``.h5``              → ``.csv``
+
+    The output is always a single file (the inverse — splitting a
+    single file into chunks — is :func:`split_csv`). When the input is
+    a folder, every CSV inside it is read with raw ``pandas.read_csv``
+    (no naming-convention check on the chunk files); the model ID is
+    taken from *output_path*.
 
     Parameters
     ----------
     input_path : str
         A CSV file, an H5 file, or a folder of chunk CSVs.
     output_path : str
-        Output file path. Must follow the Ersilia naming convention.
+        Output file path. Must follow the Ersilia naming convention
+        (``[prefix_]<model_id>_<version>.csv`` or ``.h5``).
 
     Raises
     ------
     EosframesError
-        On naming convention violations, existing output, or unsupported formats.
+        On naming convention violations of *output_path*, existing
+        output, an empty input folder, or unsupported file extensions.
     """
     logger = get_logger()
-    if not is_valid_name(output_path):
-        raise EosframesError(
-            f"Output '{output_path}' does not follow the naming convention. "
-            "Expected: <model_id>_<version>.<ext> (e.g. eos4e40_v1.csv or eos4e40_v1.h5)"
-        )
-    if os.path.exists(output_path):
-        raise EosframesError(
-            f"Output file '{output_path}' already exists. Remove it first."
-        )
+    parsed = _require_valid_output_name(output_path)
+    _require_no_overwrite(output_path)
 
-    parsed = parse_name(output_path)
     model_id = parsed["model_id"]
     out_ext = parsed["extension"]
 
@@ -158,38 +256,40 @@ def convert_file(input_path: str, output_path: str) -> None:
 def stack_files(input_paths: List[str], output_path: str) -> None:
     """Horizontally stack outputs from multiple Ersilia models into one CSV.
 
-    The *output filename* selects the naming mode:
+    The *output filename* selects the column-naming mode:
 
-    * **Mode A (eosmix)** — ``[prefix]_eosmix.csv``. Feature columns get
-      suffixed with ``_<model_id>_<version>``. The mixture filename does
-      not embed the model list.
-    * **Mode B (explicit)** — ``[prefix]_<m1>_<v1>_..._<mN>_<vN>.csv``.
-      Feature columns stay bare. The filename must list every stacked
-      ``(model_id, version)`` in the same order as ``input_paths``.
+    * **Mode A (eosmix)** — ``[prefix_]eosmix.csv``. Feature columns are
+      suffixed with ``_<model_id>_<version>`` so column names carry the
+      provenance. The output filename does not embed the model list.
+    * **Mode B (explicit)** — ``[prefix_]<m1>_<v1>_..._<mN>_<vN>.csv``.
+      Feature columns stay bare. The output filename must list every
+      stacked ``(model_id, version)`` in the same order as
+      *input_paths*.
 
-    All input files must follow the Ersilia naming convention and contain
-    the same rows in the same order.
+    All input files must follow the Ersilia naming convention and
+    contain the same molecules in the same row order. Duplicate
+    ``(model_id, version)`` pairs across inputs are rejected — they
+    would collide in Mode A and produce ambiguous filenames in Mode B.
 
     Parameters
     ----------
     input_paths : list of str
-        Two or more CSV or H5 files, each following the naming convention.
+        Two or more CSV or H5 files, each following the naming
+        convention.
     output_path : str
-        Output CSV path. Must follow either Mode A or Mode B above.
+        Output CSV path. Must follow either Mode A or Mode B.
 
     Raises
     ------
     EosframesError
         On naming violations, duplicate ``(model_id, version)`` pairs,
-        Mode B order mismatch, or input mismatch.
+        Mode B model-order mismatch between filename and input order,
+        pre-existing output, or input row mismatch.
     """
     logger = get_logger()
     if len(input_paths) < 2:
         raise EosframesError("At least two input files are required for stacking.")
-    if os.path.exists(output_path):
-        raise EosframesError(
-            f"Output file '{output_path}' already exists. Remove it first."
-        )
+    _require_no_overwrite(output_path)
 
     dfs = []
     input_pairs: List[Tuple[str, str]] = []  # (model_id, version) per input
@@ -198,8 +298,8 @@ def stack_files(input_paths: List[str], output_path: str) -> None:
         if parsed is None or parsed["name_type"] not in {"csv", "h5"}:
             raise EosframesError(
                 f"'{path}' does not follow the naming convention. "
-                "Expected: [prefix]_<model_id>_<version>.<ext> "
-                "(e.g. eos4e40_v1.csv)"
+                "Expected: [prefix_]<model_id>_<version>.<ext> "
+                "with ext in {csv, h5}."
             )
         logger.info("Reading %s", path)
         df = _read_file(path)
@@ -256,35 +356,34 @@ def stack_files(input_paths: List[str], output_path: str) -> None:
 def append_files(input_paths: List[str], output_path: str) -> None:
     """Vertically concatenate files from the same Ersilia model.
 
-    All input files must share the same model ID and identical columns.
-    Rows are appended in the order given.
+    All input files must share the same model ID (encoded in their
+    filenames) and have identical column layouts. Rows are appended in
+    the order given. Duplicate keys, if any, are *not* removed —
+    follow with :func:`dedupe_file` if needed.
 
     Parameters
     ----------
     input_paths : list of str
-        Two or more CSV or H5 files.
+        Two or more CSV or H5 files. Each must follow the naming
+        convention.
     output_path : str
-        Output file path. Must follow the naming convention.
+        Output file path. Must follow the naming convention; its
+        encoded model ID determines the expected model ID for all
+        inputs.
 
     Raises
     ------
     EosframesError
-        On model ID mismatch, column mismatch, or invalid naming.
+        On invalid output naming, pre-existing output, model-ID
+        mismatch between an input and the output, or column mismatch
+        across inputs.
     """
     logger = get_logger()
     if len(input_paths) < 2:
         raise EosframesError("At least two input files are required for appending.")
-    if not is_valid_name(output_path):
-        raise EosframesError(
-            f"Output '{output_path}' does not follow the naming convention. "
-            "Expected: <model_id>_<version>.<ext> (e.g. eos4e40_v1.csv or eos4e40_v1.h5)"
-        )
-    if os.path.exists(output_path):
-        raise EosframesError(
-            f"Output file '{output_path}' already exists. Remove it first."
-        )
+    out_parsed = _require_valid_output_name(output_path)
+    _require_no_overwrite(output_path)
 
-    out_parsed = parse_name(output_path)
     expected_model_id = out_parsed["model_id"]
     out_ext = out_parsed["extension"]
 
@@ -322,37 +421,35 @@ def append_files(input_paths: List[str], output_path: str) -> None:
 
 
 def dedupe_file(input_path: str, output_path: str) -> Tuple[int, int]:
-    """Remove duplicate rows by key, keeping the first occurrence.
+    """Remove duplicate rows by ``key``, keeping the first occurrence.
 
     Parameters
     ----------
     input_path : str
-        Input CSV or H5 file.
+        Input CSV or H5 file. Must follow the naming convention and
+        contain a ``key`` column.
     output_path : str
-        Output file path. Must follow the naming convention.
+        Output file path. Must follow the naming convention; its
+        encoded model ID must match the input.
 
     Returns
     -------
-    tuple of (int, int)
-        ``(rows_before, rows_after)``
+    rows_before : int
+        Row count of the input file.
+    rows_after : int
+        Row count after deduplication. ``rows_before - rows_after`` is
+        the number of duplicate rows that were dropped.
 
     Raises
     ------
     EosframesError
-        On naming convention violations or model ID mismatch.
+        On naming convention violations, pre-existing output,
+        model-ID mismatch, or a missing ``key`` column.
     """
     logger = get_logger()
-    if not is_valid_name(output_path):
-        raise EosframesError(
-            f"Output '{output_path}' does not follow the naming convention. "
-            "Expected: <model_id>_<version>.<ext> (e.g. eos4e40_v1.csv or eos4e40_v1.h5)"
-        )
-    if os.path.exists(output_path):
-        raise EosframesError(
-            f"Output file '{output_path}' already exists. Remove it first."
-        )
+    out_parsed = _require_valid_output_name(output_path)
+    _require_no_overwrite(output_path)
 
-    out_parsed = parse_name(output_path)
     expected_model_id = out_parsed["model_id"]
     out_ext = out_parsed["extension"]
 
@@ -415,7 +512,6 @@ def _classify_stack_columns_mode_a(
             "'<original>_<model_id>_<version>':\n  "
             + ", ".join(bad[:10])
             + (" ..." if len(bad) > 10 else "")
-            + "\nExpected e.g. 'inhibition_50um_eos4e40_v1'."
         )
     return parsed
 
@@ -533,11 +629,7 @@ def unstack_file(input_path: str, output_folder: str) -> List[str]:
         or unmatched columns (Mode B), or pre-existing output folder.
     """
     logger = get_logger()
-    if os.path.exists(output_folder):
-        raise EosframesError(
-            f"Output folder '{output_folder}' already exists. "
-            "Remove it or choose a different name."
-        )
+    _require_no_overwrite(output_folder, kind="folder")
 
     mix = parse_stack_mix_name(input_path)
     explicit = parse_stack_explicit_name(input_path)
@@ -565,8 +657,8 @@ def unstack_file(input_path: str, output_folder: str) -> List[str]:
             )
     feature_cols = [c for c in df.columns if c not in {"key", "input"}]
 
-    # Assemble per-(model, version) column lists.
-    # assignments: [(stacked_col_name, model_id, version, output_col_name), ...]
+    # Assemble per-(model, version) column lists. Each assignment entry is a
+    # tuple of stacked_col_name, model_id, version, output_col_name.
     assignments: List[Tuple[str, str, str, str]]
     if mode == "eosmix":
         parsed = _classify_stack_columns_mode_a(feature_cols)
