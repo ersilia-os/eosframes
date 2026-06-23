@@ -1,6 +1,10 @@
 # Manually added
 example*
-data/
+# eosvc-managed artifact folders: ignore contents, keep the folders themselves.
+data/*
+!data/.gitkeep
+output/*
+!output/.gitkeep
 *.env
 .ipynb_checkpoints
 .jupyter_ystore.db

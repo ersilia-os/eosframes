@@ -223,8 +223,10 @@ specific drift.
 ## Edge cases worth knowing
 
 - **Sparse mode-0 counts** that collapse to a handful of distinct outputs
-  get a `degenerate: True` flag in `fit_notes` and a warning at fit. The
-  transform behaviour is unchanged — the flag is advisory.
+  get a `degenerate: True` flag in each column's `fit_notes`. The transform
+  behaviour is unchanged — the flag is advisory. At fit time a single
+  aggregated warning reports how many columns tripped the flag (rather than
+  one line per column), so sparse fingerprints don't flood the log.
 - **All-NaN columns** fall back to `kind: constant` with `impute_value:
   0.0`. Scaling produces 0 for any non-NaN input and NaN for NaN.
 - **Binary `transform` with unseen values** snaps each input to the nearer

@@ -752,6 +752,9 @@ def _fit_count(series: pd.Series) -> dict:
         # Flag near-degenerate sparse counts where most rows are 0 and
         # the scaler can only produce a handful of distinct values. Goes
         # into fit_notes — advisory only, never read by the transform.
+        # No per-column log here: sparse fingerprints (e.g. Morgan counts)
+        # flag hundreds of columns and would flood the log. fit() emits a
+        # single aggregated summary instead.
         scaled = np.clip(arr / high_anchor, 0.0, 1.0)
         n_distinct = int(np.unique(scaled).size)
         mode_fraction = float((arr == 0.0).sum()) / float(arr.size)
@@ -764,15 +767,6 @@ def _fit_count(series: pd.Series) -> dict:
                 "mode_fraction": mode_fraction,
                 "n_distinct_output": n_distinct,
             }
-            get_logger().warning(
-                "Count column '%s' is near-degenerate "
-                "(mode_fraction=%.2f, n_distinct_output=%d). "
-                "Output collapses to a handful of values — "
-                "consider dropping it or revisiting upstream featurization.",
-                series.name,
-                mode_fraction,
-                n_distinct,
-            )
         return entry
 
     # Count with a non-zero mode. Linear+clip on each side of the mode,
@@ -1325,6 +1319,29 @@ def fit(df: pd.DataFrame) -> dict:
         len(numeric_cols),
         kind_breakdown,
     )
+
+    # Single aggregated advisory for near-degenerate count columns. The
+    # per-column flag lives in each entry's fit_notes; here we just
+    # summarise how many tripped it so sparse fingerprints don't flood
+    # the log with one warning per bit.
+    degenerate_cols = [
+        col
+        for col, entry in columns.items()
+        if entry.get("fit_notes", {}).get("degenerate")
+    ]
+    if degenerate_cols:
+        preview = ", ".join(str(c) for c in degenerate_cols[:5])
+        if len(degenerate_cols) > 5:
+            preview += ", …"
+        logger.warning(
+            "%d of %d count columns are near-degenerate (e.g. %s): output "
+            "collapses to a handful of values. Common for sparse "
+            "fingerprints; see each column's fit_notes for details. "
+            "Consider dropping them or revisiting upstream featurization.",
+            len(degenerate_cols),
+            len(numeric_cols),
+            preview,
+        )
 
     return {"method": _METHOD_NAME, "columns": columns}
 

@@ -65,6 +65,31 @@ Run `eosframes --help` (or `eosframes <command> --help`) for inline help.
 
 See [`docs/cli.md`](docs/cli.md) for every flag, example, and refusal condition.
 
+## Scripts
+
+[`scripts/build_scaler.sh`](scripts/build_scaler.sh) builds and packages a scaler
+for one model in a single step: it pulls the model's precalculations from the
+[isaura](https://github.com/ersilia-os/isaura) store over the Ersilia reference
+library (`data/ersilia_reference_library_v0.csv`), fits an `eosframes` scaler, and
+compresses the transformer into a versioned zip.
+
+```bash
+scripts/build_scaler.sh <model_id> <version>      # e.g. eos4e40 v1
+```
+
+The artifact is written to:
+
+```
+output/ersilia_reference_library_v0/<model_id>/<version>/scaler-<eosframes-major>.zip
+```
+
+(e.g. `output/ersilia_reference_library_v0/eos4e40/v1/scaler-1.zip`), containing a
+single `<model_id>_<version>_transformer.json`. The bucket defaults to
+`isaura-public`; override it with the `PROJECT_NAME` environment variable.
+
+**Prerequisites:** `isaura` and `eosframes` on `PATH`, and a running local isaura
+MinIO engine (`isaura engine --start`).
+
 ## Documentation
 
 - [`docs/cli.md`](docs/cli.md) — every CLI command, all flags, examples, and error patterns.
