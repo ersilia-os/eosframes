@@ -237,6 +237,34 @@ specific drift.
 - **High-missing columns are not skipped.** Every numeric column is fitted;
   if you want to drop columns by missingness, do it upstream.
 
+## Memory and large files
+
+The file-level `fit_file` / `transform_file` never hold the whole matrix in
+memory — which matters for wide Ersilia outputs (thousands of fingerprint or
+descriptor columns over millions of rows, tens of GB on disk).
+
+- **Fit walks one column at a time.** Each column's parameters depend only
+  on that column's own distribution, so the natural unit is a single full
+  column (~`n_rows` values). On the columnar **H5** layout a column is a
+  cheap `values[:, j]` slice. A **CSV** is row-major and can't be
+  column-sliced without rescanning the whole file, so `fit_file` first
+  streams the CSV — in `chunksize`-row blocks — into a temporary `float32`
+  H5, fits column-by-column from it, then deletes it. That is the one
+  unavoidable full read of the CSV, done without ever loading it whole.
+- **Transform walks one row-chunk at a time.** Each output cell is a pure
+  function of its input and the column's fitted params, so transform streams
+  `chunksize` rows in, scales them, writes them, and discards — peak memory
+  is one chunk in plus one chunk out, for any CSV/H5 in-and-out combination.
+- **Tip.** For repeated runs on a huge CSV, `eosframes convert big.csv -o
+  big.h5` once; both fit and transform then read the H5 natively with no
+  per-run staging pass.
+
+The in-memory `fit(df)` / `transform(df, params)` still operate on a whole
+DataFrame and are the right tool when the frame already fits in RAM. The
+`float32` staging means CSV-fitted parameters are computed at single
+precision; for fingerprint / descriptor outputs this is below the noise of
+the quantile-based fit.
+
 ## Where to look in the code
 
 All paths are relative to `src/eosframes/scale.py`. Line numbers drift —
@@ -259,6 +287,9 @@ function names are stable.
 | Float → int8                  | `_quantize_to_int8`                         |
 | Top-level fit                 | `fit` (DataFrame), `fit_file` (path)        |
 | Top-level transform           | `transform`, `transform_file`               |
+| Per-column fit (shared)       | `_fit_series`, `_log_fit_summary`           |
+| Streaming column fit source   | `_iter_h5_columns`, `_stage_csv_to_h5`      |
+| Streaming row-chunk transform | `_streaming_transform`, `_iter_row_chunks`, `_StreamWriter` |
 
 For threshold constants (Bowley cutoff, tail-asymmetry ratio, degenerate
 distinct-count and mode-fraction limits, the int8 NaN sentinel) see the

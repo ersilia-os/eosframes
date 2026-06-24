@@ -662,8 +662,26 @@ def columns(input_file: str, output: str) -> None:
         "transform time."
     ),
 )
+@click.option(
+    "--chunksize",
+    "chunksize",
+    type=int,
+    default=_scale._DEFAULT_CHUNKSIZE,
+    show_default=True,
+    help=(
+        "Rows per streamed chunk. The fit never holds the whole file — it "
+        "walks one column at a time (CSV inputs are first staged to a "
+        "temporary columnar H5 in chunks of this size). Lower it for very "
+        "wide frames, raise it for narrow ones."
+    ),
+)
 def fit(
-    input_file: str, scaler: str, output: str, quantize: bool, impute: bool
+    input_file: str,
+    scaler: str,
+    output: str,
+    quantize: bool,
+    impute: bool,
+    chunksize: int,
 ) -> None:
     """Fit a type-aware robust scaler on INPUT_FILE and save parameters to SCALER.
 
@@ -700,6 +718,7 @@ def fit(
             output_path=output,
             output_dtype=output_dtype,
             impute=impute,
+            chunksize=chunksize,
         )
     except EosframesError as e:
         raise _err(e) from e
@@ -744,8 +763,25 @@ def fit(
         "no -128 sentinels)."
     ),
 )
+@click.option(
+    "--chunksize",
+    "chunksize",
+    type=int,
+    default=_scale._DEFAULT_CHUNKSIZE,
+    show_default=True,
+    help=(
+        "Rows per streamed chunk. The input is read and the output written "
+        "one chunk at a time, so memory stays bounded regardless of file "
+        "size. Lower it for very wide frames, raise it for narrow ones."
+    ),
+)
 def transform(
-    input_file: str, scaler: str, output: str, quantize: bool, impute: bool
+    input_file: str,
+    scaler: str,
+    output: str,
+    quantize: bool,
+    impute: bool,
+    chunksize: int,
 ) -> None:
     """Apply a saved scaler to INPUT_FILE and write scaled data to OUTPUT.
 
@@ -759,7 +795,12 @@ def transform(
     output_dtype = "int8" if quantize else "float32"
     try:
         out = _scale.transform_file(
-            input_file, scaler, output, output_dtype=output_dtype, impute=impute
+            input_file,
+            scaler,
+            output,
+            output_dtype=output_dtype,
+            impute=impute,
+            chunksize=chunksize,
         )
     except EosframesError as e:
         raise _err(e) from e

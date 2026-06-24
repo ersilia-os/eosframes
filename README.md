@@ -65,6 +65,11 @@ Run `eosframes --help` (or `eosframes <command> --help`) for inline help.
 
 See [`docs/cli.md`](docs/cli.md) for every flag, example, and refusal condition.
 
+`fit` and `transform` stream in bounded memory — `fit` walks one column at a
+time, `transform` one row-chunk at a time — so they handle files far larger
+than RAM (wide fingerprint frames, tens of GB). Tune `--chunksize` to trade
+memory for throughput.
+
 ## Scripts
 
 [`scripts/build_scaler.sh`](scripts/build_scaler.sh) builds and packages a scaler
@@ -94,7 +99,7 @@ MinIO engine (`isaura engine --start`).
 
 - [`docs/cli.md`](docs/cli.md) — every CLI command, all flags, examples, and error patterns.
 - [`docs/nomenclature.md`](docs/nomenclature.md) — every recognised filename / directory pattern, the strict/lenient contract, and the two stack modes.
-- [`docs/scaling.md`](docs/scaling.md) — the type-aware robust scaler: column kinds, how each is picked, and quantization / imputation.
+- [`docs/scaling.md`](docs/scaling.md) — the type-aware robust scaler: column kinds, how each is picked, quantization / imputation, and the bounded-memory streaming fit/transform for large files.
 
 ## About the Ersilia Open Source Initiative
 

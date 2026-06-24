@@ -284,7 +284,7 @@ each is picked, and the on-disk JSON schema.
 ### `fit` — fit a scaler and save its parameters
 
 ```
-eosframes fit INPUT -s TRANSFORMER.json [-o SCALED] [--quantize] [--impute]
+eosframes fit INPUT -s TRANSFORMER.json [-o SCALED] [--quantize] [--impute] [--chunksize N]
 ```
 
 Auto-classifies every numeric feature column and writes a dtype-agnostic
@@ -294,12 +294,21 @@ scaler JSON. The JSON's filename must match the
 ID / version. If `-o` is given, also runs the inline transform once
 (fit-transform).
 
+**Memory.** The fit never loads the whole file. It walks one feature
+column at a time (~`n_rows` values), so a frame with thousands of columns
+fits in a fraction of its on-disk size. H5 inputs are column-sliced
+directly; CSV inputs are first streamed — in row-chunks of `--chunksize`
+— into a temporary columnar H5, which is removed after the fit. (For
+repeated work on a huge CSV, `eosframes convert INPUT.csv -o INPUT.h5`
+once, then fit/transform on the H5 to skip the per-run staging pass.)
+
 | Flag | Required | Default | Description |
 |---|---|---|---|
 | `-s`, `--scaler PATH` | yes | — | Where to save the scaler JSON. Must follow the transformer convention. |
 | `-o`, `--output PATH` | no | — | If set, also write the scaled output here (fit-transform). |
 | `--quantize` | no | off | Only meaningful with `-o`: write the inline output as int8 in `[-127, 127]` (`-128` for NaN). The saved scaler JSON is **always** dtype-agnostic. |
 | `--impute` | no | off | Only meaningful with `-o`: replace input NaN with each column's fit-time median before the inline transform. The scaler JSON always records the impute value; this flag only opts in for the inline output. |
+| `--chunksize INTEGER` | no | `50000` | Rows per chunk for CSV→H5 staging and the inline transform. Bounds peak memory; lower for very wide frames, raise for narrow ones. |
 
 ```bash
 eosframes fit eos4e40_v1.csv -s eos4e40_v1_transformer.json
@@ -320,11 +329,16 @@ already exists.
 ### `transform` — apply a saved scaler
 
 ```
-eosframes transform INPUT -s TRANSFORMER.json -o OUTPUT [--quantize] [--impute]
+eosframes transform INPUT -s TRANSFORMER.json -o OUTPUT [--quantize] [--impute] [--chunksize N]
 ```
 
 Loads the scaler JSON, validates compatibility, and writes the scaled
 output. `key` and `input` columns pass through unchanged.
+
+**Memory.** Input is read and output written one row-chunk of
+`--chunksize` at a time, so peak memory is one chunk in plus one chunk
+out — independent of file size. Works for any CSV/H5 in-and-out
+combination.
 
 | Flag | Required | Default | Description |
 |---|---|---|---|
@@ -332,6 +346,7 @@ output. `key` and `input` columns pass through unchanged.
 | `-o`, `--output PATH` | yes | — | Output file. Format inferred from extension (`.csv` / `.h5`). |
 | `--quantize` | no | off | Quantize output to int8 in `[-127, 127]` (`-128` for NaN). |
 | `--impute` | no | off | Replace input NaN with each column's recorded `impute_value` before applying the transform. The output will have no NaN entries. |
+| `--chunksize INTEGER` | no | `50000` | Rows per streamed chunk. Bounds peak memory; lower for very wide frames, raise for narrow ones. |
 
 ```bash
 eosframes transform new_eos4e40_v1.csv -s eos4e40_v1_transformer.json -o scaled.csv
@@ -374,6 +389,17 @@ The error message always carries a concrete suggestion — read the
   `eosframes.set_verbosity(True)` from Python) opens up the DEBUG stream:
   HTTP probe traces, per-chunk index lines, per-column classifier
   decisions in `fit`.
+- **Progress.** The streaming `fit` / `transform` report progress two ways,
+  picked automatically (both at INFO or more verbose; silent under
+  `EOSFRAMES_LOG_LEVEL=WARNING`):
+  - **Interactive terminal** — an in-place progress bar on stderr (the fit
+    bar counts columns, the transform bar counts row-chunks).
+  - **Piped / non-interactive** (a log file, `nohup`, CI, `build_scaler.sh`)
+    — periodic INFO log lines instead, so a long job on a huge file stays
+    legible. You'll see `Staging: N rows written…` during CSV→H5 staging,
+    `Fitting columns: k/N (p%)` through the fit, and `Transforming chunks:
+    k/N (p%)` through the transform (percentages whenever the row count is
+    known up front, i.e. H5 inputs).
 - **stderr vs stdout.** Logs go to stderr. The only thing on stdout is
   the path of the file a command just wrote (when applicable) — so you
   can pipe `eosframes fit ... -o file | xargs ...`.

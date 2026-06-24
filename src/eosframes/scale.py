@@ -173,8 +173,9 @@ hand-maintained schema number.
 
 import json
 import os
+import tempfile
 from datetime import datetime
-from typing import Callable, Dict, Optional, Tuple
+from typing import Callable, Dict, Iterator, Optional, Tuple
 
 import h5py
 import numpy as np
@@ -189,6 +190,7 @@ from .naming import (
     parse_name,
     parse_transformer_name,
 )
+from .utils import progress
 
 _META_COLS = {"key", "input"}
 
@@ -196,6 +198,19 @@ _METHOD_NAME = "robust_typed"
 
 _VALID_OUTPUT_DTYPES = ("float32", "int8")
 _DEFAULT_OUTPUT_DTYPE = "float32"
+
+# Rows per chunk for the streaming file-level fit/transform paths. Big
+# enough to amortise per-chunk overhead, small enough that one chunk of a
+# wide frame stays well under a GB (e.g. 50k rows × 3k cols × 4B ≈ 0.6 GB).
+_DEFAULT_CHUNKSIZE = 50_000
+
+# Row cadence for the CSV→H5 staging milestone log (independent of chunksize,
+# so the log reads the same whatever chunk size the caller picks).
+_STAGE_LOG_ROWS = 1_000_000
+
+# Target number of progress log lines for the column-fit and row-chunk
+# transform loops when running off-TTY (one line per ~5% of the work).
+_PROGRESS_LOG_STEPS = 20
 
 _INT8_NAN_SENTINEL = -128
 _INT8_MAX_VAL = 127
@@ -1237,6 +1252,73 @@ def _dispatch_apply(
 # ---------------------------------------------------------------------------
 
 
+def _fit_series(series: pd.Series) -> dict:
+    """Classify one column and fit its type-specific transform.
+
+    Shared by the in-memory :func:`fit` and the streaming
+    :func:`fit_file`. All-NaN columns and columns that slip past
+    classification without a usable scale both fall back to
+    ``kind: "constant"``.
+    """
+    if series.dropna().empty:
+        # All-NaN column: fit as a constant. The dispatch at transform
+        # time maps non-NaN inputs to 0 and propagates NaN.
+        return _fit_constant(series)
+    type_ = _classify_type(series)
+    if type_ == "constant":
+        return _fit_constant(series)
+    if type_ == "binary":
+        return _fit_binary(series)
+    if type_ == "count":
+        return _fit_count(series)
+    try:
+        return _fit_continuous(series)
+    except EosframesError:
+        # Column slipped past _classify_type but has no usable scale.
+        return _fit_constant(series)
+
+
+def _log_fit_summary(columns: dict, logger) -> None:
+    """Emit the per-fit kind breakdown and near-degenerate advisory.
+
+    Shared by :func:`fit` and :func:`fit_file` so the streaming and
+    in-memory paths log identically.
+    """
+    kind_counts: dict = {}
+    for entry in columns.values():
+        kind = entry["transform"]["kind"]
+        kind_counts[kind] = kind_counts.get(kind, 0) + 1
+
+    kind_breakdown = ", ".join(
+        f"{kind}={count}" for kind, count in sorted(kind_counts.items())
+    )
+    n = len(columns)
+    logger.info("Fitted %d / %d numeric columns (%s)", n, n, kind_breakdown)
+
+    # Single aggregated advisory for near-degenerate count columns. The
+    # per-column flag lives in each entry's fit_notes; here we just
+    # summarise how many tripped it so sparse fingerprints don't flood
+    # the log with one warning per bit.
+    degenerate_cols = [
+        col
+        for col, entry in columns.items()
+        if entry.get("fit_notes", {}).get("degenerate")
+    ]
+    if degenerate_cols:
+        preview = ", ".join(str(c) for c in degenerate_cols[:5])
+        if len(degenerate_cols) > 5:
+            preview += ", …"
+        logger.warning(
+            "%d of %d count columns are near-degenerate (e.g. %s): output "
+            "collapses to a handful of values. Common for sparse "
+            "fingerprints; see each column's fit_notes for details. "
+            "Consider dropping them or revisiting upstream featurization.",
+            len(degenerate_cols),
+            n,
+            preview,
+        )
+
+
 def fit(df: pd.DataFrame) -> dict:
     """Fit a type-aware robust scaler on the numeric feature columns.
 
@@ -1282,67 +1364,10 @@ def fit(df: pd.DataFrame) -> dict:
         raise EosframesError("No numeric feature columns found to fit the scaler.")
 
     columns: dict = {}
-    kind_counts: dict = {}
+    for col in progress(numeric_cols, desc="Fitting columns"):
+        columns[col] = _fit_series(df[col])
 
-    for col in numeric_cols:
-        series = df[col]
-
-        if series.dropna().empty:
-            # All-NaN column: fit as a constant. The dispatch at
-            # transform time maps non-NaN inputs to 0 and propagates NaN.
-            entry = _fit_constant(series)
-        else:
-            type_ = _classify_type(series)
-            if type_ == "constant":
-                entry = _fit_constant(series)
-            elif type_ == "binary":
-                entry = _fit_binary(series)
-            elif type_ == "count":
-                entry = _fit_count(series)
-            else:
-                try:
-                    entry = _fit_continuous(series)
-                except EosframesError:
-                    # Column slipped past _classify_type but has no usable scale.
-                    entry = _fit_constant(series)
-
-        columns[col] = entry
-        kind = entry["transform"]["kind"]
-        kind_counts[kind] = kind_counts.get(kind, 0) + 1
-
-    kind_breakdown = ", ".join(
-        f"{kind}={count}" for kind, count in sorted(kind_counts.items())
-    )
-    logger.info(
-        "Fitted %d / %d numeric columns (%s)",
-        len(numeric_cols),
-        len(numeric_cols),
-        kind_breakdown,
-    )
-
-    # Single aggregated advisory for near-degenerate count columns. The
-    # per-column flag lives in each entry's fit_notes; here we just
-    # summarise how many tripped it so sparse fingerprints don't flood
-    # the log with one warning per bit.
-    degenerate_cols = [
-        col
-        for col, entry in columns.items()
-        if entry.get("fit_notes", {}).get("degenerate")
-    ]
-    if degenerate_cols:
-        preview = ", ".join(str(c) for c in degenerate_cols[:5])
-        if len(degenerate_cols) > 5:
-            preview += ", …"
-        logger.warning(
-            "%d of %d count columns are near-degenerate (e.g. %s): output "
-            "collapses to a handful of values. Common for sparse "
-            "fingerprints; see each column's fit_notes for details. "
-            "Consider dropping them or revisiting upstream featurization.",
-            len(degenerate_cols),
-            len(numeric_cols),
-            preview,
-        )
-
+    _log_fit_summary(columns, logger)
     return {"method": _METHOD_NAME, "columns": columns}
 
 
@@ -1392,6 +1417,12 @@ def transform(
         On column mismatch, invalid ``output_dtype``, or unknown
         column type in *params*.
     """
+    _validate_transform(df, params, output_dtype)
+    return _apply_transform(df, params, output_dtype, impute, show_progress=True)
+
+
+def _validate_transform(df: pd.DataFrame, params: dict, output_dtype: str) -> None:
+    """Check output dtype and exact feature-column match before applying."""
     if output_dtype not in _VALID_OUTPUT_DTYPES:
         raise EosframesError(
             f"Unknown output_dtype '{output_dtype}'. Supported: {_VALID_OUTPUT_DTYPES}"
@@ -1406,9 +1437,29 @@ def transform(
             f"but transformer was fitted on {expected_feature_cols}."
         )
 
+
+def _apply_transform(
+    df: pd.DataFrame,
+    params: dict,
+    output_dtype: str,
+    impute: bool,
+    show_progress: bool,
+) -> pd.DataFrame:
+    """Apply the fitted per-column transforms to *df* (already validated).
+
+    *show_progress* draws the per-column bar — on for the single-shot
+    in-memory :func:`transform`, off for the streaming path where the bar
+    would otherwise redraw once per row-chunk.
+    """
     columns = params["columns"]
+    expected_feature_cols = list(columns.keys())
     result = df.copy()
-    for col in expected_feature_cols:
+    iterator = (
+        progress(expected_feature_cols, desc="Transforming columns")
+        if show_progress
+        else expected_feature_cols
+    )
+    for col in iterator:
         entry = columns[col]
         series = df[col]
         if impute:
@@ -1428,30 +1479,245 @@ def _values_dtype_for(output_dtype: str) -> np.dtype:
     return np.float32
 
 
-def _write_df(
-    df: pd.DataFrame, output_path: str, values_dtype: np.dtype = np.float32
-) -> None:
-    """Write a DataFrame to CSV or H5, bypassing the naming convention check.
+# ---------------------------------------------------------------------------
+# Streaming primitives — bounded-memory fit/transform for very wide or very
+# tall files. The whole matrix is never resident: fit walks one column at a
+# time (cheap on the columnar H5 layout), transform walks row-chunks.
+# ---------------------------------------------------------------------------
 
-    *values_dtype* controls the H5 ``values`` dataset dtype; CSV ignores it.
+
+def _h5_feature_names(h5_path: str) -> list:
+    with h5py.File(h5_path, "r") as f:
+        return [x.decode("utf-8") for x in f["features"][:]]
+
+
+def _h5_nrows(h5_path: str) -> int:
+    with h5py.File(h5_path, "r") as f:
+        return int(f["values"].shape[0])
+
+
+def _iter_h5_columns(h5_path: str) -> Iterator[Tuple[str, np.ndarray]]:
+    """Yield ``(feature_name, full_column_array)`` one column at a time.
+
+    Each ``f["values"][:, j]`` slice pulls a single column across all rows
+    — ~``N`` floats — so peak memory is one column, not the whole matrix.
     """
-    ext = os.path.splitext(output_path)[1].lower()
-    if ext == ".csv":
-        df.to_csv(output_path, index=False)
-    elif ext == ".h5":
-        feat_cols = [c for c in df.columns if c not in _META_COLS]
-        with h5py.File(output_path, "w") as f:
-            dt = h5py.string_dtype(encoding="utf-8")
-            if "key" in df.columns:
-                f.create_dataset("key", data=df["key"].astype(str).tolist(), dtype=dt)
-            if "input" in df.columns:
-                f.create_dataset(
-                    "input", data=df["input"].astype(str).tolist(), dtype=dt
+    with h5py.File(h5_path, "r") as f:
+        features = [x.decode("utf-8") for x in f["features"][:]]
+        values = f["values"]
+        for j, name in enumerate(features):
+            yield name, values[:, j]
+
+
+def _stage_csv_to_h5(csv_path: str, h5_path: str, chunksize: int) -> Tuple[list, int]:
+    """Stream a CSV into a columnar temp H5 in one bounded-memory pass.
+
+    Reads the CSV in row-chunks and appends each chunk's numeric feature
+    columns to a resizable ``values`` dataset (``float32`` — matches the
+    pipeline's default output precision). Returns ``(feature_cols, n_rows)``.
+    The resulting H5 is then cheaply column-sliceable for the fit.
+    """
+    logger = get_logger()
+    feature_cols: Optional[list] = None
+    total = 0
+    next_log = _STAGE_LOG_ROWS
+    with h5py.File(h5_path, "w") as f:
+        values_ds = None
+        for chunk in pd.read_csv(csv_path, chunksize=chunksize):
+            if feature_cols is None:
+                feat = [c for c in chunk.columns if c not in _META_COLS]
+                feature_cols = [
+                    c for c in feat if pd.api.types.is_numeric_dtype(chunk[c])
+                ]
+                values_ds = f.create_dataset(
+                    "values",
+                    shape=(0, len(feature_cols)),
+                    maxshape=(None, len(feature_cols)),
+                    dtype=np.float32,
+                    chunks=True,
                 )
-            f.create_dataset("features", data=feat_cols, dtype=dt)
-            f.create_dataset("values", data=df[feat_cols].values, dtype=values_dtype)
+                logger.info(
+                    "Staging: detected %d numeric feature columns", len(feature_cols)
+                )
+            arr = chunk[feature_cols].to_numpy(dtype=np.float32)
+            n = arr.shape[0]
+            values_ds.resize(total + n, axis=0)
+            values_ds[total : total + n, :] = arr
+            total += n
+            if total >= next_log:
+                logger.info("Staging: %s rows written to temp H5", f"{total:,}")
+                next_log += _STAGE_LOG_ROWS
+        dt = h5py.string_dtype(encoding="utf-8")
+        f.create_dataset("features", data=feature_cols or [], dtype=dt)
+    logger.info(
+        "Staging complete: %s rows × %d columns → %s",
+        f"{total:,}",
+        len(feature_cols or []),
+        os.path.basename(h5_path),
+    )
+    return feature_cols or [], total
+
+
+def _iter_row_chunks(path: str, chunksize: int) -> Iterator[pd.DataFrame]:
+    """Yield row-chunk DataFrames (``key``/``input`` + feature cols) from a file.
+
+    CSV is streamed natively by pandas; H5 is sliced ``[start:end, :]`` so
+    only ``chunksize`` rows are resident at a time. The yielded frames have
+    the same column layout the in-memory :func:`transform` expects.
+    """
+    ext = os.path.splitext(path)[1].lower()
+    if ext == ".csv":
+        yield from pd.read_csv(path, chunksize=chunksize)
+    elif ext == ".h5":
+        with h5py.File(path, "r") as f:
+            features = [x.decode("utf-8") for x in f["features"][:]]
+            values = f["values"]
+            n_rows = values.shape[0]
+            has_key = "key" in f
+            for start in range(0, n_rows, chunksize):
+                end = min(start + chunksize, n_rows)
+                meta = {}
+                if has_key:
+                    meta["key"] = [x.decode("utf-8") for x in f["key"][start:end]]
+                meta["input"] = [x.decode("utf-8") for x in f["input"][start:end]]
+                block = pd.DataFrame(values[start:end, :], columns=features)
+                yield pd.concat([pd.DataFrame(meta), block], axis=1)
     else:
-        raise EosframesError(f"Unsupported output format '{ext}'. Expected .csv or .h5")
+        raise EosframesError(f"Unsupported input format '{ext}'. Expected .csv or .h5")
+
+
+class _StreamWriter:
+    """Incremental CSV/H5 writer — appends row-chunks without holding the file.
+
+    CSV: header on the first chunk, append thereafter. H5: resizable
+    ``values`` / ``input`` / ``key`` datasets created from the first chunk's
+    schema, then extended per chunk. Bypasses the naming-convention check
+    (the caller has already validated the output path).
+    """
+
+    def __init__(self, path: str, values_dtype: np.dtype):
+        self.path = path
+        self.ext = os.path.splitext(path)[1].lower()
+        self.values_dtype = values_dtype
+        if self.ext not in (".csv", ".h5"):
+            raise EosframesError(
+                f"Unsupported output format '{self.ext}'. Expected .csv or .h5"
+            )
+        self._csv_started = False
+        self._h5 = None
+        self._feature_cols: Optional[list] = None
+        self._has_key = False
+        self._n = 0
+
+    def write(self, df: pd.DataFrame) -> None:
+        if self.ext == ".csv":
+            df.to_csv(
+                self.path,
+                mode="w" if not self._csv_started else "a",
+                header=not self._csv_started,
+                index=False,
+            )
+            self._csv_started = True
+        else:
+            if self._h5 is None:
+                self._init_h5(df)
+            self._append_h5(df)
+
+    def _init_h5(self, df: pd.DataFrame) -> None:
+        self._feature_cols = [c for c in df.columns if c not in _META_COLS]
+        self._has_key = "key" in df.columns
+        self._h5 = h5py.File(self.path, "w")
+        dt = h5py.string_dtype(encoding="utf-8")
+        self._h5.create_dataset("features", data=self._feature_cols, dtype=dt)
+        self._values = self._h5.create_dataset(
+            "values",
+            shape=(0, len(self._feature_cols)),
+            maxshape=(None, len(self._feature_cols)),
+            dtype=self.values_dtype,
+            chunks=True,
+        )
+        self._input = self._h5.create_dataset(
+            "input", shape=(0,), maxshape=(None,), dtype=dt
+        )
+        if self._has_key:
+            self._key = self._h5.create_dataset(
+                "key", shape=(0,), maxshape=(None,), dtype=dt
+            )
+
+    def _append_h5(self, df: pd.DataFrame) -> None:
+        n = len(df)
+        new = self._n + n
+        self._values.resize(new, axis=0)
+        self._values[self._n : new, :] = df[self._feature_cols].to_numpy(
+            dtype=self.values_dtype
+        )
+        self._input.resize(new, axis=0)
+        self._input[self._n : new] = df["input"].astype(str).tolist()
+        if self._has_key:
+            self._key.resize(new, axis=0)
+            self._key[self._n : new] = df["key"].astype(str).tolist()
+        self._n = new
+
+    def close(self) -> None:
+        if self._h5 is not None:
+            self._h5.close()
+            self._h5 = None
+
+
+def _streaming_transform(
+    input_path: str,
+    transformer: dict,
+    output_path: str,
+    output_dtype: str,
+    impute: bool,
+    chunksize: int,
+) -> int:
+    """Row-chunked transform: read a chunk, scale it, write it, repeat.
+
+    Reuses the in-memory per-column dispatch on each small chunk (with its
+    per-column bar suppressed), so peak memory is one chunk in + one chunk
+    out — independent of file size. Returns the number of rows written.
+    """
+    logger = get_logger()
+    in_ext = os.path.splitext(input_path)[1].lower()
+    # Row count is free for H5 (so we get a true % bar / steady log cadence);
+    # for CSV it is unknown without a full scan, so we log every fixed number
+    # of chunks instead.
+    total_chunks = None
+    if in_ext == ".h5":
+        total_chunks = (_h5_nrows(input_path) + chunksize - 1) // chunksize
+        logger.info(
+            "Transforming %s rows in %d chunks of %d",
+            f"{_h5_nrows(input_path):,}",
+            total_chunks,
+            chunksize,
+        )
+    log_every = (
+        max(1, total_chunks // _PROGRESS_LOG_STEPS)
+        if total_chunks
+        else _PROGRESS_LOG_STEPS
+    )
+
+    writer = _StreamWriter(output_path, _values_dtype_for(output_dtype))
+    chunks = progress(
+        _iter_row_chunks(input_path, chunksize),
+        total=total_chunks,
+        desc="Transforming chunks",
+        log_every=log_every,
+    )
+
+    total_rows = 0
+    try:
+        for chunk in chunks:
+            _validate_transform(chunk, transformer, output_dtype)
+            scaled = _apply_transform(
+                chunk, transformer, output_dtype, impute, show_progress=False
+            )
+            writer.write(scaled)
+            total_rows += len(scaled)
+    finally:
+        writer.close()
+    return total_rows
 
 
 def fit_file(
@@ -1460,15 +1726,25 @@ def fit_file(
     output_path: Optional[str] = None,
     output_dtype: str = _DEFAULT_OUTPUT_DTYPE,
     impute: bool = False,
+    chunksize: int = _DEFAULT_CHUNKSIZE,
 ) -> str:
     """Fit a scaler on an Ersilia output file and save the parameters.
+
+    **Bounded memory.** The full matrix is never resident. The fit walks
+    one feature column at a time, so peak memory is a single column
+    (~``n_rows`` floats) regardless of how wide the file is. H5 inputs are
+    sliced column-by-column directly. CSV inputs are first streamed — in
+    row-chunks of *chunksize* — into a temporary columnar H5 (``float32``),
+    which is then column-sliced for the fit and removed afterwards; this is
+    the one unavoidable full read of the CSV, done without loading it whole.
 
     The scaler JSON written to *scaler_path* is dtype-agnostic — see
     :func:`fit` for the parameter set. When *output_path* is provided
     the scaled data is also written immediately (fit-then-transform in
-    one call), and *output_dtype* selects the dtype of that inline
-    output. The dtype is **not** recorded in the scaler JSON; later
-    calls to :func:`transform_file` choose the dtype independently.
+    one call, streamed row-chunk by row-chunk), and *output_dtype* selects
+    the dtype of that inline output. The dtype is **not** recorded in the
+    scaler JSON; later calls to :func:`transform_file` choose the dtype
+    independently.
 
     The scaler filename's encoded model ID and version must match the
     input file's. The transformer JSON records ``eosframes_version``
@@ -1495,6 +1771,10 @@ def fit_file(
         Only used for the inline transform when *output_path* is
         given. ``"int8"`` quantizes the scaled values into
         ``[-127, 127]`` with sentinel ``-128`` for missing.
+    chunksize : int, default ``50_000``
+        Rows per chunk for the CSV→H5 staging pass and the inline
+        transform. Bounds peak memory; tune down for extremely wide
+        frames, up for narrow ones.
 
     Returns
     -------
@@ -1548,27 +1828,70 @@ def fit_file(
             f"Output file '{output_path}' already exists. Remove it first."
         )
 
-    from .ops import _read_file
-
-    df = _read_file(input_path)
-
     if output_dtype not in _VALID_OUTPUT_DTYPES:
         raise EosframesError(
             f"Unknown output_dtype '{output_dtype}'. Supported: {_VALID_OUTPUT_DTYPES}"
         )
 
+    in_ext = os.path.splitext(input_path)[1].lower()
     mode_label = "fit + transform" if output_path is not None else "fit only"
-    logger.info("%s — reading %d rows from %s", mode_label, len(df), input_path)
-    fitted = fit(df)
+
+    # Resolve a column-sliceable H5 to fit from. H5 inputs are used as-is;
+    # CSV inputs are streamed into a temporary columnar H5 first.
+    staged_tmp: Optional[str] = None
+    try:
+        if in_ext == ".h5":
+            fit_source = input_path
+            feature_cols = _h5_feature_names(input_path)
+            n_rows = _h5_nrows(input_path)
+        elif in_ext == ".csv":
+            fd, staged_tmp = tempfile.mkstemp(
+                suffix=".h5", dir=os.path.dirname(os.path.abspath(input_path))
+            )
+            os.close(fd)
+            logger.info(
+                "%s — staging CSV → temporary columnar H5 for column-wise fit "
+                "(chunksize=%d)",
+                mode_label,
+                chunksize,
+            )
+            feature_cols, n_rows = _stage_csv_to_h5(input_path, staged_tmp, chunksize)
+            fit_source = staged_tmp
+        else:
+            raise EosframesError(
+                f"Unsupported input format '{in_ext}'. Expected .csv or .h5"
+            )
+
+        if not feature_cols:
+            raise EosframesError("No numeric feature columns found to fit the scaler.")
+
+        logger.info(
+            "%s — fitting %d columns over %s rows, one column at a time",
+            mode_label,
+            len(feature_cols),
+            f"{n_rows:,}",
+        )
+        columns: dict = {}
+        for name, arr in progress(
+            _iter_h5_columns(fit_source),
+            total=len(feature_cols),
+            desc="Fitting columns",
+            log_every=max(1, len(feature_cols) // _PROGRESS_LOG_STEPS),
+        ):
+            columns[name] = _fit_series(pd.Series(arr))
+        _log_fit_summary(columns, logger)
+    finally:
+        if staged_tmp is not None and os.path.exists(staged_tmp):
+            os.remove(staged_tmp)
 
     transformer = {
         "eosframes_version": _PACKAGE_VERSION,
-        "method": fitted["method"],
+        "method": _METHOD_NAME,
         "model_id": parsed["model_id"],
         "model_version": parsed["version"],
         "fitted_at": datetime.now().isoformat(timespec="seconds"),
-        "n_rows": len(df),
-        "columns": fitted["columns"],
+        "n_rows": n_rows,
+        "columns": columns,
     }
     with open(scaler_path, "w") as fh:
         json.dump(transformer, fh, indent=2)
@@ -1580,13 +1903,15 @@ def fit_file(
             output_dtype,
             impute,
         )
-        scaled_df = transform(df, transformer, output_dtype=output_dtype, impute=impute)
-        _write_df(
-            scaled_df,
+        written = _streaming_transform(
+            input_path,
+            transformer,
             output_path,
-            values_dtype=_values_dtype_for(output_dtype),
+            output_dtype,
+            impute,
+            chunksize,
         )
-        logger.info("Scaled output written to %s", output_path)
+        logger.info("Scaled output written to %s (%d rows)", output_path, written)
 
     return scaler_path
 
@@ -1597,8 +1922,14 @@ def transform_file(
     output_path: str,
     output_dtype: str = _DEFAULT_OUTPUT_DTYPE,
     impute: bool = False,
+    chunksize: int = _DEFAULT_CHUNKSIZE,
 ) -> str:
     """Apply a saved scaler to an Ersilia output file.
+
+    **Bounded memory.** The input is read and the output written one
+    row-chunk of *chunksize* at a time, so peak memory is a single chunk
+    in plus a single chunk out — independent of the file's size. Works for
+    CSV and H5 inputs and outputs in any combination.
 
     The scaler's recorded ``eosframes_version`` must exactly match the
     running ``eosframes.__version__``, and ``method`` must still be
@@ -1621,6 +1952,9 @@ def transform_file(
     output_dtype : {"float32", "int8"}, default ``"float32"``
         ``"int8"`` quantizes scaled values to ``[-127, 127]`` with
         sentinel ``-128`` for missing.
+    chunksize : int, default ``50_000``
+        Rows per streamed chunk. Bounds peak memory; tune down for
+        extremely wide frames, up for narrow ones.
 
     Returns
     -------
@@ -1695,19 +2029,21 @@ def transform_file(
             f"scaler was fitted on '{t_model_version}'."
         )
 
-    from .ops import _read_file
-
-    df = _read_file(input_path)
-
     logger.info(
-        "Applying scaler to %d rows from %s (output_dtype=%s, impute=%s)",
-        len(df),
+        "Applying scaler to %s in row-chunks (chunksize=%d, output_dtype=%s, "
+        "impute=%s)",
         input_path,
+        chunksize,
         output_dtype,
         impute,
     )
-    scaled_df = transform(df, transformer, output_dtype=output_dtype, impute=impute)
-
-    _write_df(scaled_df, output_path, values_dtype=_values_dtype_for(output_dtype))
-    logger.info("Scaled output written to %s", output_path)
+    written = _streaming_transform(
+        input_path,
+        transformer,
+        output_path,
+        output_dtype,
+        impute,
+        chunksize,
+    )
+    logger.info("Scaled output written to %s (%d rows)", output_path, written)
     return output_path
