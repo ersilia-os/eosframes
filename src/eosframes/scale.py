@@ -208,6 +208,18 @@ _DEFAULT_CHUNKSIZE = 50_000
 # so the log reads the same whatever chunk size the caller picks).
 _STAGE_LOG_ROWS = 1_000_000
 
+# Columns pulled per HDF5 read during the fit. Reading the values dataset one
+# column at a time forces a re-read of every storage chunk the column touches,
+# so we read a batch of columns at once and then fit each column from the
+# in-memory block. 100 cols × n_rows × 4 B stays bounded (~0.5 GB at 1.3 M
+# rows) while cutting the number of HDF5 reads ~100×.
+_FIT_COLUMN_BATCH = 100
+
+# Target bytes per HDF5 storage chunk for the staged values dataset. Chunks are
+# tiled ``(row_tile, _FIT_COLUMN_BATCH)`` so the fit's column-batch reads align
+# to chunk boundaries — each chunk is read exactly once across the whole fit.
+_STAGE_CHUNK_BYTES = 4 * 1024 * 1024
+
 # Target number of progress log lines for the column-fit and row-chunk
 # transform loops when running off-TTY (one line per ~5% of the work).
 _PROGRESS_LOG_STEPS = 20
@@ -1496,17 +1508,25 @@ def _h5_nrows(h5_path: str) -> int:
         return int(f["values"].shape[0])
 
 
-def _iter_h5_columns(h5_path: str) -> Iterator[Tuple[str, np.ndarray]]:
-    """Yield ``(feature_name, full_column_array)`` one column at a time.
+def _iter_h5_columns(
+    h5_path: str, batch: int = _FIT_COLUMN_BATCH
+) -> Iterator[Tuple[str, np.ndarray]]:
+    """Yield ``(feature_name, full_column_array)`` for every feature column.
 
-    Each ``f["values"][:, j]`` slice pulls a single column across all rows
-    — ~``N`` floats — so peak memory is one column, not the whole matrix.
+    Columns are pulled from disk a *batch* at a time — one ``values[:,
+    start:stop]`` hyperslab — then handed out one at a time from that
+    in-memory block. This keeps peak memory bounded (``batch`` columns, not
+    the whole matrix) while reading each underlying HDF5 storage chunk once,
+    instead of re-reading it for every column it contains.
     """
     with h5py.File(h5_path, "r") as f:
         features = [x.decode("utf-8") for x in f["features"][:]]
         values = f["values"]
-        for j, name in enumerate(features):
-            yield name, values[:, j]
+        n_features = len(features)
+        for start in range(0, n_features, batch):
+            block = values[:, start : start + batch]  # (n_rows, ≤batch)
+            for k in range(block.shape[1]):
+                yield features[start + k], block[:, k]
 
 
 def _stage_csv_to_h5(csv_path: str, h5_path: str, chunksize: int) -> Tuple[list, int]:
@@ -1529,16 +1549,23 @@ def _stage_csv_to_h5(csv_path: str, h5_path: str, chunksize: int) -> Tuple[list,
                 feature_cols = [
                     c for c in feat if pd.api.types.is_numeric_dtype(chunk[c])
                 ]
+                n_feat = len(feature_cols)
+                # Tile chunks to the fit's column-batch width so each storage
+                # chunk is read exactly once during the (batched) column fit.
+                if n_feat > 0:
+                    col_tile = min(n_feat, _FIT_COLUMN_BATCH)
+                    row_tile = max(1, _STAGE_CHUNK_BYTES // (col_tile * 4))
+                    chunk_shape: object = (row_tile, col_tile)
+                else:
+                    chunk_shape = True
                 values_ds = f.create_dataset(
                     "values",
-                    shape=(0, len(feature_cols)),
-                    maxshape=(None, len(feature_cols)),
+                    shape=(0, n_feat),
+                    maxshape=(None, n_feat),
                     dtype=np.float32,
-                    chunks=True,
+                    chunks=chunk_shape,
                 )
-                logger.info(
-                    "Staging: detected %d numeric feature columns", len(feature_cols)
-                )
+                logger.info("Staging: detected %d numeric feature columns", n_feat)
             arr = chunk[feature_cols].to_numpy(dtype=np.float32)
             n = arr.shape[0]
             values_ds.resize(total + n, axis=0)
@@ -1730,10 +1757,12 @@ def fit_file(
 ) -> str:
     """Fit a scaler on an Ersilia output file and save the parameters.
 
-    **Bounded memory.** The full matrix is never resident. The fit walks
-    one feature column at a time, so peak memory is a single column
-    (~``n_rows`` floats) regardless of how wide the file is. H5 inputs are
-    sliced column-by-column directly. CSV inputs are first streamed — in
+    **Bounded memory.** The full matrix is never resident. The fit reads a
+    batch of feature columns at a time (``_FIT_COLUMN_BATCH``) and fits each
+    column from that in-memory block, so peak memory is the batch
+    (~``batch × n_rows`` floats) — a few hundred MB — regardless of how wide
+    the file is. H5 inputs are sliced directly; CSV inputs are first
+    streamed — in
     row-chunks of *chunksize* — into a temporary columnar H5 (``float32``),
     which is then column-sliced for the fit and removed afterwards; this is
     the one unavoidable full read of the CSV, done without loading it whole.
@@ -1866,10 +1895,11 @@ def fit_file(
             raise EosframesError("No numeric feature columns found to fit the scaler.")
 
         logger.info(
-            "%s — fitting %d columns over %s rows, one column at a time",
+            "%s — fitting %d columns over %s rows (batches of %d)",
             mode_label,
             len(feature_cols),
             f"{n_rows:,}",
+            _FIT_COLUMN_BATCH,
         )
         columns: dict = {}
         for name, arr in progress(

@@ -243,14 +243,19 @@ The file-level `fit_file` / `transform_file` never hold the whole matrix in
 memory — which matters for wide Ersilia outputs (thousands of fingerprint or
 descriptor columns over millions of rows, tens of GB on disk).
 
-- **Fit walks one column at a time.** Each column's parameters depend only
-  on that column's own distribution, so the natural unit is a single full
-  column (~`n_rows` values). On the columnar **H5** layout a column is a
-  cheap `values[:, j]` slice. A **CSV** is row-major and can't be
-  column-sliced without rescanning the whole file, so `fit_file` first
-  streams the CSV — in `chunksize`-row blocks — into a temporary `float32`
-  H5, fits column-by-column from it, then deletes it. That is the one
-  unavoidable full read of the CSV, done without ever loading it whole.
+- **Fit reads a batch of columns at a time.** Each column's parameters
+  depend only on that column's own distribution, so the fit walks the
+  columns — but reading them *one at a time* from HDF5 is pathological: a
+  `values[:, j]` slice has to touch every storage chunk the column overlaps,
+  so column-by-column re-reads the same chunks many times. Instead `fit_file`
+  pulls a batch of columns per read (`_FIT_COLUMN_BATCH`, 100) and fits each
+  column from that in-memory block — peak memory is the batch (~a few hundred
+  MB), and each chunk is read once. The staged H5's chunks are tiled to the
+  batch width so the reads land on chunk boundaries. A **CSV** is row-major
+  and can't be column-sliced without rescanning, so `fit_file` first streams
+  it — in `chunksize`-row blocks — into that temporary `float32` H5, then
+  deletes it. That is the one unavoidable full read of the CSV, done without
+  ever loading it whole.
 - **Transform walks one row-chunk at a time.** Each output cell is a pure
   function of its input and the column's fitted params, so transform streams
   `chunksize` rows in, scales them, writes them, and discards — peak memory
